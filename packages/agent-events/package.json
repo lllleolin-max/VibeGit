@@ -1,0 +1,1 @@
+{"name":"@vibegit/agent-events","version":"0.1.0","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@vibegit/shared":"workspace:*","@vibegit/checkpoint-engine":"workspace:*","@vibegit/database":"workspace:*"}}

@@ -1,0 +1,11 @@
+{
+  "name": "vibegit",
+  "displayName": "VibeGit",
+  "version": "0.1.0",
+  "description": "Create local VibeGit protection points before and after Claude Code turns.",
+  "author": {
+    "name": "VibeGit"
+  },
+  "keywords": ["backup", "checkpoint", "safety", "vibe-coding"]
+}
+

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' http://localhost:* ws://localhost:*" />
+    <title>VibeGit</title>
+    <style>
+      #boot-shell{position:fixed;inset:0;display:grid;place-items:center;background:#f4f2ed;color:#2d342f;font:500 15px system-ui}
+      #boot-shell span{display:flex;align-items:center;gap:10px}
+      #boot-shell i{width:9px;height:9px;border-radius:50%;background:#2d7d61;box-shadow:0 0 0 6px rgba(45,125,97,.12)}
+    </style>
+  </head>
+  <body>
+    <div id="boot-shell"><span><i></i>正在打开你的项目保险箱…</span></div>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>
+

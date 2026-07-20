@@ -1,0 +1,45 @@
+{
+  "description": "Save reversible VibeGit protection points around Claude Code turns",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vibegit",
+            "args": ["hook", "claude-code", "--stdin"],
+            "timeout": 15,
+            "statusMessage": "VibeGit 正在创建修改前保护点"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vibegit",
+            "args": ["hook", "claude-code", "--stdin"],
+            "timeout": 15,
+            "statusMessage": "VibeGit 正在保存本轮修改"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vibegit",
+            "args": ["hook", "claude-code", "--stdin"],
+            "timeout": 15,
+            "statusMessage": "VibeGit 正在保护任务中断前的修改"
+          }
+        ]
+      }
+    ]
+  }
+}
+

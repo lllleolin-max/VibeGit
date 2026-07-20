@@ -1,0 +1,14 @@
+{
+  "name": "@vibegit/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "../../out/main/index.js",
+  "dependencies": {
+    "@vibegit/core": "workspace:*",
+    "@vibegit/shared": "workspace:*",
+    "lucide-react": "1.24.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  }
+}

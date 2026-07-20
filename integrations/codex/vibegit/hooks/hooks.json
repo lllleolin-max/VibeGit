@@ -1,0 +1,31 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vibegit hook codex --stdin",
+            "commandWindows": "vibegit hook codex --stdin",
+            "timeout": 15,
+            "statusMessage": "VibeGit 正在创建修改前保护点"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "vibegit hook codex --stdin",
+            "commandWindows": "vibegit hook codex --stdin",
+            "timeout": 15,
+            "statusMessage": "VibeGit 正在保存本轮修改"
+          }
+        ]
+      }
+    ]
+  }
+}
+

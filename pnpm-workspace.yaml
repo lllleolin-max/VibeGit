@@ -1,0 +1,10 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+onlyBuiltDependencies:
+  - "@swc/core"
+  - "esbuild"
+  - "electron"
+allowBuilds:
+  '@swc/core': true
+  esbuild: true

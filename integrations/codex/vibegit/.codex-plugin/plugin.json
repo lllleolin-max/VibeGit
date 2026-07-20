@@ -1,0 +1,17 @@
+{
+  "name": "vibegit",
+  "version": "0.1.0",
+  "description": "Create local VibeGit protection points before and after Codex turns.",
+  "author": {
+    "name": "Local developer"
+  },
+  "interface": {
+    "displayName": "VibeGit",
+    "shortDescription": "Protect every Codex change locally.",
+    "longDescription": "VibeGit records a local protection point before each Codex prompt and a feature save point when the turn stops. It only acts on projects already registered in the VibeGit desktop app.",
+    "developerName": "VibeGit",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Show me how VibeGit protects this project."
+  }
+}
