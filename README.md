@@ -1,5 +1,7 @@
 # VibeGit
 
+![VibeGit logo](assets/branding/vibegit-project-logo.png)
+
 VibeGit 是一个面向非程序员 Vibe Coder 的本地桌面版本保险箱。它把 Git 的底层能力包装成“项目、保存点、这次改了什么、暂时收起、回到这个版本、备份到 GitHub”，让 Codex、Claude Code 等 Agent 的每轮修改都可理解、可恢复。
 
 当前仓库交付的是可运行的源码 MVP，不是安装包。P0 本地闭环、统一 Agent 事件 CLI、GitHub Provider 与真实 Electron UI 已实现；Codex/Claude Code 自动安装器属于 P1，当前只提供经过验证或明确标注限制的 Hook 模板。
@@ -36,7 +38,7 @@ pnpm build
 pnpm exec electron .
 ```
 
-首次使用时选择正在用 AI 开发的文件夹，点击“开启版本保护”。VibeGit 会初始化 Git（若需要）并创建初始保存点，不会创建或切换普通分支。若选择的是已有 Git 项目的子目录，应用会提示重新选择项目根目录，以避免越过你选择的范围。
+也可以直接双击 `启动 VibeGit.cmd`，它会启动 Electron 桌面版。首次使用时点击“选择项目文件夹”，即可通过 Windows 原生文件夹选择器定位项目，无需手输完整路径。VibeGit 会初始化 Git（若需要）并创建初始保存点，不会创建或切换普通分支。若选择的是已有 Git 项目的子目录，应用会提示重新选择项目根目录，以避免越过你选择的范围。
 
 ## Agent 事件 CLI
 
@@ -52,11 +54,9 @@ Get-Content hook.json | node dist/cli/index.js hook claude-code --stdin
 
 ## GitHub 私有备份
 
-```powershell
-gh auth login
-```
+安装 GitHub CLI 后，在项目页点击“GitHub 备份”中的“连接 GitHub 并创建 SSH 密钥”。VibeGit 会打开 GitHub 浏览器授权、在应用数据目录创建专用 Ed25519 密钥并仅上传公钥；随后即可一键创建 Private 仓库并安全备份。私钥不会写入项目目录、数据库或日志。
 
-随后可在应用中创建显式 Private 仓库或连接现有 GitHub 仓库。VibeGit 使用专用 `vibegit` remote，不改写你现有的 `origin`。每次同步先建立 `pre_sync` 保存点并重新扫描敏感文件，只有扫描通过才把该树导出到远程 `vibegit-backup` 分支并执行非强制 push。详见 [GitHub 设置](docs/GITHUB_SETUP.md)。
+VibeGit 使用专用 `vibegit` remote，不改写你现有的 `origin`。新建备份仓库使用 `ssh.github.com:443`，适合常见的受限网络；每次同步先建立 `pre_sync` 保存点并重新扫描敏感文件，只有扫描通过才把该树导出到远程 `vibegit-backup` 分支并执行非强制 push。详见 [GitHub 设置](docs/GITHUB_SETUP.md)。
 
 ## 验证命令
 
@@ -92,7 +92,7 @@ docs                      产品、架构、安全与验收文档
 
 ## 当前外部限制
 
-- 本机未安装 `gh`，因此没有伪造真实 GitHub 授权或远程仓库 smoke；Private 参数、未登录/缺失状态、可见性复核、目标 URL 绑定、非强制本地远程 push 和敏感阻断均由自动化测试覆盖。
+- GitHub 的 Private 参数、未登录/缺失状态、可见性复核、目标 URL 绑定、非强制本地远程 push 和敏感阻断均由自动化测试覆盖；发布前仍建议在安装了 GitHub CLI 的目标机器上完成一次真实授权与备份演练。
 - 本机未安装 Claude Code，模板未执行 `claude plugin validate --strict`；JSON、事件映射和适配器已测试。
 - Codex 插件模板已通过本地 validator，但自动安装器和面向普通用户的自包含 CLI 可执行文件仍是 P1。
 - `node:sqlite` 在当前 Node/Electron 版本仍会输出 ExperimentalWarning；数据库层已隔离该 API，升级运行时时必须重跑全量测试。

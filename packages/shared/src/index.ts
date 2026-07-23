@@ -199,6 +199,13 @@ export interface GitHubCliStatus {
   installed: boolean
   authenticated: boolean
   username?: string
+  sshKeyReady?: boolean
+  message: string
+}
+
+export interface GitHubOnboardingResult {
+  username: string
+  sshKeyCreated: boolean
   message: string
 }
 
@@ -352,6 +359,7 @@ export const IPC_CHANNELS = {
   createShelf: 'shelves:create',
   retrieveShelf: 'shelves:retrieve',
   githubStatus: 'github:status',
+  githubAuthorize: 'github:authorize',
   githubScan: 'github:scan',
   githubCreatePrivate: 'github:create-private',
   githubConnect: 'github:connect',
@@ -387,6 +395,7 @@ export interface VibeGitApi {
   createShelf(projectId: string, title: string): Promise<ApiResult<ShelvedChange>>
   retrieveShelf(shelfId: string): Promise<ApiResult<ShelvedChange>>
   githubStatus(): Promise<ApiResult<GitHubCliStatus>>
+  githubAuthorize(): Promise<ApiResult<GitHubOnboardingResult>>
   githubScan(projectId: string): Promise<ApiResult<SensitiveScanResult>>
   githubCreatePrivate(input: CreatePrivateRepositoryInput): Promise<ApiResult<Project>>
   githubConnect(input: ConnectRemoteInput): Promise<ApiResult<Project>>

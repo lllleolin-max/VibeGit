@@ -12,6 +12,7 @@
   },
   "scripts": {
     "dev": "electron-vite dev",
+    "preview:desktop": "electron-vite build && electron .",
     "preview:browser": "electron-vite build && tsx scripts/browser-server.ts",
     "dev:cli": "tsx apps/cli/src/index.ts",
     "lint": "eslint . --max-warnings=0",

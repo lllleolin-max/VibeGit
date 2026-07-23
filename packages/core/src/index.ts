@@ -14,6 +14,7 @@ import type {
   CreateCheckpointInput,
   CreatePrivateRepositoryInput,
   GitHubCliStatus,
+  GitHubOnboardingResult,
   GitHubSyncResult,
   HealthStatus,
   Project,
@@ -87,6 +88,7 @@ export class VibeGitService {
     this.agentEvents = new AgentEventService(this.database, this.checkpoints)
     this.github = new GitHubProvider(this.database, this.git, this.checkpoints, {
       ...(options.ghExecutable ? { ghExecutable: options.ghExecutable } : {}),
+      dataDirectory,
       timeoutMs: commandTimeoutMs
     })
   }
@@ -291,6 +293,10 @@ export class VibeGitService {
 
   async githubStatus(): Promise<GitHubCliStatus> {
     return await this.github.status(this.settings.dataDirectory)
+  }
+
+  async authorizeGitHub(): Promise<GitHubOnboardingResult> {
+    return await this.github.authorizeAndProvisionSshKey(this.settings.dataDirectory)
   }
 
   async scanSensitiveFiles(projectId: string): Promise<SensitiveScanResult> {

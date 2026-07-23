@@ -7,9 +7,9 @@ if not exist "%VIBEGIT_PNPM%" goto missing_pnpm
 
 set "PATH=%VIBEGIT_NODE_BIN%;%PATH%"
 cd /d "%~dp0"
-echo [VibeGit] Starting local browser mode. Please wait...
+echo [VibeGit] Starting the desktop app. Please wait...
 echo [VibeGit] Keep this window open while using the app.
-call "%VIBEGIT_PNPM%" preview:browser
+call "%VIBEGIT_PNPM%" preview:desktop
 if errorlevel 1 goto failed
 exit /b 0
 

@@ -21,6 +21,7 @@ const api: VibeGitApi = {
   createShelf: (projectId, title) => ipcRenderer.invoke(IPC_CHANNELS.createShelf, projectId, title),
   retrieveShelf: (shelfId) => ipcRenderer.invoke(IPC_CHANNELS.retrieveShelf, shelfId),
   githubStatus: () => ipcRenderer.invoke(IPC_CHANNELS.githubStatus),
+  githubAuthorize: () => ipcRenderer.invoke(IPC_CHANNELS.githubAuthorize),
   githubScan: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.githubScan, projectId),
   githubCreatePrivate: (input) => ipcRenderer.invoke(IPC_CHANNELS.githubCreatePrivate, input),
   githubConnect: (input) => ipcRenderer.invoke(IPC_CHANNELS.githubConnect, input),

@@ -1,5 +1,18 @@
 # Final Validation
 
+## 2026-07-23 更新
+
+本次发布前复核已完成以下命令：
+
+| 命令 | 实际结果 |
+| --- | --- |
+| `pnpm lint` | 通过；0 warning / 0 error。 |
+| `pnpm build` | 通过；Electron 主进程、preload、renderer 和 CLI 均完成构建，并已打包 VibeGit 品牌素材。 |
+| `pnpm exec vitest run tests/ui/app.test.tsx` | 通过：7/7；覆盖文件夹选择兼容提示与一键 GitHub/SSH 授权入口。 |
+| `pnpm exec vitest run tests/github/github-provider.test.ts tests/git-engine/git-engine.test.ts` | 通过：19/19；覆盖专用 SSH 传输和 GitHub Provider 安全边界。 |
+
+完整回归套件与桌面 E2E 应在发布机器上作为发布门禁继续执行；它们涉及真实 Electron 启动和较长的 Git 安全场景。
+
 运行日期：2026-07-12（Asia/Shanghai）。所有命令在工作区根目录执行。
 
 | 命令 | 实际结果 |

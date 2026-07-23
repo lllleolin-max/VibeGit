@@ -33,6 +33,8 @@ import {
   Undo2,
   X
 } from 'lucide-react'
+import appLogo from './assets/vibegit-app-logo.png'
+import projectLogo from './assets/vibegit-project-logo.png'
 import type {
   AgentEventRecord,
   AgentConnectionStatus,
@@ -52,7 +54,6 @@ import type {
 
 type Page = 'projects' | 'project' | 'settings'
 type Modal =
-  | { kind: 'add' }
   | { kind: 'save' }
   | { kind: 'restore'; preview: RestorePreview; checkpoint: Checkpoint }
   | { kind: 'backup' }
@@ -189,10 +190,6 @@ export function App(): ReactNode {
   }
 
   const chooseProject = async (): Promise<void> => {
-    if (window.vibegitRuntime === 'browser') {
-      setModal({ kind: 'add' })
-      return
-    }
     setBusy('add-project')
     setError(undefined)
     try {
@@ -361,13 +358,6 @@ export function App(): ReactNode {
           onRestore={() => void prepareRestore(selectedCheckpoint)}
         />
       )}
-      {modal?.kind === 'add' && (
-        <AddProjectModal
-          busy={busy === 'add-project'}
-          onClose={() => setModal(null)}
-          onAdd={addProjectPath}
-        />
-      )}
       {modal?.kind === 'save' && selectedProject && (
         <SaveModal
           project={selectedProject}
@@ -440,8 +430,7 @@ function Sidebar(props: {
   return (
     <aside className="sidebar">
       <button className="brand" onClick={props.onProjects}>
-        <span className="brand-mark"><ShieldCheck size={19} /></span>
-        <span><strong>VibeGit</strong><small>项目保险箱</small></span>
+        <img className="brand-logo" src={projectLogo} alt="VibeGit" />
       </button>
       <nav className="primary-nav" aria-label="主导航">
         <button className={props.page === 'projects' ? 'active' : ''} onClick={props.onProjects}><FolderHeart size={17} />所有项目</button>
@@ -474,7 +463,7 @@ function ProjectsHome(props: { projects: Project[]; busy?: string | undefined; o
       </header>
       {props.projects.length === 0 ? (
         <div className="welcome-card">
-          <div className="welcome-visual"><Shield size={44} /><Sparkles size={22} /></div>
+          <div className="welcome-visual"><img className="welcome-app-logo" src={appLogo} alt="" /><Sparkles size={22} /></div>
           <div><span className="pill neutral">首次使用</span><h2>先选择一个正在用 AI 开发的文件夹</h2><p>我们不会上传或删除文件。开启保护后，会为当前状态建立第一个保存点。</p>
             <button className="button primary large" onClick={props.onAdd}><FolderOpen size={18} />选择项目文件夹</button>
           </div>
@@ -535,7 +524,7 @@ function ProjectWorkspace(props: {
         <div className="protection-setup">
           <div className="protection-icon"><Shield size={34} /></div>
           <div><span className="pill warning">尚未保护</span><h2>为这个项目开启版本保护</h2><p>VibeGit 会初始化本地版本记录并创建初始保存点，不会上传文件，也不会改变你的工作方式。</p>
-            <div className="setup-guarantees"><span><Check size={15} />不删除现有文件</span><span><Check size={15} />不要求理解 Git</span><span><Check size={15} />之后可以安全回退</span></div>
+            <div className="setup-guarantees"><span><Check size={15} />文件安全不丢失</span><span><Check size={15} />Git 操作一键完成</span><span><Check size={15} />修改记录随时回退</span></div>
             <button className="button primary large" onClick={props.onInitialize} disabled={props.busy === 'initialize'}>{props.busy === 'initialize' ? <LoaderCircle className="spin" size={18} /> : <ShieldCheck size={18} />}开启版本保护</button>
           </div>
         </div>
@@ -619,21 +608,6 @@ function PatchView({ patch }: { patch: string }): ReactNode {
     !line.startsWith('@@ ')
   )
   return <pre className="patch-view">{lines.map((line, index) => <span key={`${index}-${line.slice(0, 8)}`} className={line.startsWith('+') ? 'added' : line.startsWith('-') ? 'removed' : ''}><i>{index + 1}</i><code>{line || ' '}</code></span>)}</pre>
-}
-
-function AddProjectModal(props: { busy: boolean; onClose(): void; onAdd(path: string): Promise<void> }): ReactNode {
-  const [path, setPath] = useState('')
-  const submit = (event: FormEvent): void => {
-    event.preventDefault()
-    if (path.trim()) void props.onAdd(path.trim())
-  }
-  return <ModalFrame title="添加本地项目" subtitle="由于 Windows 应用控制策略，兼容模式需要你粘贴项目文件夹的完整路径。" onClose={props.onClose}>
-    <form onSubmit={submit} className="modal-form">
-      <label>项目文件夹完整路径<input autoFocus value={path} onChange={(event) => setPath(event.target.value)} placeholder="例如：D:\我的项目" /></label>
-      <div className="insurance-note"><ShieldCheck size={20} /><div><strong>文件仍然只保存在你的电脑</strong><p>添加项目不会上传代码；开启版本保护前也不会修改文件内容。</p></div></div>
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose}>取消</button><button className="button primary" disabled={props.busy || !path.trim()}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}添加项目</button></div>
-    </form>
-  </ModalFrame>
 }
 
 function SaveModal(props: { project: Project; busy: boolean; onClose(): void; onSave(title: string, stable: boolean, note?: string): Promise<void> }): ReactNode {
@@ -748,6 +722,14 @@ function BackupModal(props: { project: Project; onClose(): void; onProjectChange
     try { unwrap(await window.vibegit.githubConnect({ projectId: props.project.id, remoteUrl })); await props.onProjectChange(); props.onSuccess('GitHub 备份位置已连接') }
     catch (value) { props.onError(value) } finally { setBusy(undefined) }
   }
+  const authorize = async (): Promise<void> => {
+    setBusy('authorize')
+    try {
+      const result = unwrap(await window.vibegit.githubAuthorize())
+      await refresh()
+      props.onSuccess(result.message)
+    } catch (value) { props.onError(value) } finally { setBusy(undefined) }
+  }
   const push = async (): Promise<void> => {
     setBusy('push')
     try {
@@ -764,8 +746,17 @@ function BackupModal(props: { project: Project; onClose(): void; onProjectChange
 
   return <ModalFrame wide title="GitHub 私有备份" subtitle="只会备份到你自己的 Private 仓库；每次上传前都会扫描风险。" onClose={props.onClose}>
     {loading ? <LoadingView label="正在检查 GitHub 和项目安全状态…" compact /> : <div className="backup-content">
-      <div className={`connection-card ${status?.authenticated ? 'connected' : 'offline'}`}><span>{status?.authenticated ? <CheckCircle2 size={20} /> : <TerminalSquare size={20} />}</span><div><strong>{status?.authenticated ? `GitHub 已连接${status.username ? ` · ${status.username}` : ''}` : status?.installed ? 'GitHub 尚未登录' : '尚未安装 GitHub CLI'}</strong><p>{status?.message}</p>{status?.installed && !status.authenticated && <code>gh auth login</code>}</div></div>
-      {!props.project.githubRemoteUrl ? <div className="backup-setup-grid"><form onSubmit={(event) => { event.preventDefault(); void createPrivate() }}><span className="pill safe">推荐</span><h3>创建新的私有仓库</h3><p>显式创建为 Private，不会公开你的源代码。</p><label>仓库名称<input value={repoName} onChange={(event) => setRepoName(event.target.value)} /></label><button className="button primary" disabled={!status?.authenticated || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />}创建并连接</button></form><form onSubmit={(event) => { event.preventDefault(); void connect() }}><span className="pill neutral">已有仓库</span><h3>连接现有私有仓库</h3><p>登录后会验证仓库确实是 Private，再设置备份位置。</p><label>GitHub 备份位置<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://github.com/you/project.git" /></label><button className="button secondary" disabled={!status?.authenticated || !remoteUrl.trim() || Boolean(busy)}>验证并连接</button></form></div> : <div className="remote-card"><Cloud size={20} /><div><strong>备份位置已设置</strong><p>{props.project.githubRemoteUrl}</p></div><span className={`pill ${props.project.githubSyncStatus === 'synced' ? 'safe' : 'warning'}`}>{props.project.githubSyncStatus === 'synced' ? '已同步' : '等待同步'}</span></div>}
+      <div className={`connection-card ${status?.authenticated ? 'connected' : 'offline'}`}>
+        <span>{status?.authenticated ? <CheckCircle2 size={20} /> : <TerminalSquare size={20} />}</span>
+        <div>
+          <strong>{status?.authenticated ? `GitHub 已连接${status.username ? ` · ${status.username}` : ''}` : status?.installed ? 'GitHub 尚未登录' : '尚未安装 GitHub CLI'}</strong>
+          <p>{status?.message}</p>
+          {status?.installed && !status?.sshKeyReady && <div className="connection-actions"><button className="button secondary small" disabled={Boolean(busy)} onClick={() => void authorize()}>{busy === 'authorize' ? <LoaderCircle className="spin" size={14} /> : <LockKeyhole size={14} />}{status.authenticated ? '创建并关联 SSH 密钥' : '连接 GitHub 并创建 SSH 密钥'}</button><small>会打开 GitHub 授权页面，并只向你的账户关联 VibeGit 专用公钥。</small></div>}
+          {status?.sshKeyReady && <small className="connection-ready"><ShieldCheck size={14} />已使用 VibeGit 专用 SSH 密钥</small>}
+          {!status?.installed && <small>安装 GitHub CLI 后，即可在这里一键完成浏览器授权。</small>}
+        </div>
+      </div>
+      {!props.project.githubRemoteUrl ? <div className="backup-setup-grid"><form onSubmit={(event) => { event.preventDefault(); void createPrivate() }}><span className="pill safe">推荐</span><h3>创建新的私有仓库</h3><p>显式创建为 Private，不会公开你的源代码。</p><label>仓库名称<input value={repoName} onChange={(event) => setRepoName(event.target.value)} /></label><button className="button primary" disabled={!status?.authenticated || !status?.sshKeyReady || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />}创建并连接</button></form><form onSubmit={(event) => { event.preventDefault(); void connect() }}><span className="pill neutral">已有仓库</span><h3>连接现有私有仓库</h3><p>登录后会验证仓库确实是 Private，再设置备份位置。</p><label>GitHub 备份位置<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://github.com/you/project.git" /></label><button className="button secondary" disabled={!status?.authenticated || !status?.sshKeyReady || !remoteUrl.trim() || Boolean(busy)}>验证并连接</button></form></div> : <div className="remote-card"><Cloud size={20} /><div><strong>备份位置已设置</strong><p>{props.project.githubRemoteUrl}</p></div><span className={`pill ${props.project.githubSyncStatus === 'synced' ? 'safe' : 'warning'}`}>{props.project.githubSyncStatus === 'synced' ? '已同步' : '等待同步'}</span></div>}
       <div className="scan-section"><div className="section-title"><div><h3>上传前安全检查</h3><p>检查环境变量、私钥、访问令牌、数据库、大文件和生成目录。</p></div><button className="button ghost" onClick={() => void refresh()}><RefreshCw size={15} />重新扫描</button></div>{scan?.blocked ? <div className="risk-list"><div className="risk-heading"><ShieldAlert size={19} /><strong>发现 {scan.risks.length} 项风险，已阻止上传</strong></div>{scan.risks.map((item) => <div className="risk-item" key={`${item.kind}-${item.path}`}><AlertTriangle size={17} /><div><strong>{item.path}</strong><p>{item.message}</p></div>{item.ignoreSuggestion && <button className="button small" disabled={Boolean(busy)} onClick={() => void ignore(item)}>{busy === `ignore-${item.path}` ? <LoaderCircle className="spin" size={14} /> : null}加入忽略列表</button>}</div>)}</div> : <div className="scan-safe"><ShieldCheck size={20} /><span><strong>未发现阻止备份的风险</strong><small>已检查 {scan?.scannedFiles ?? 0} 个文件</small></span></div>}</div>
       <div className="modal-actions"><button className="button ghost" onClick={props.onClose}>关闭</button><button className="button primary" disabled={!props.project.githubRemoteUrl || !status?.authenticated || scan?.blocked || Boolean(busy)} onClick={() => void push()}>{busy === 'push' ? <LoaderCircle className="spin" size={17} /> : <Cloud size={17} />}安全备份到 GitHub</button></div>
     </div>}

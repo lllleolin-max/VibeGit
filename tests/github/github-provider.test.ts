@@ -1,8 +1,8 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { GitHubProvider, type GhExecutor } from '@vibegit/github-provider'
+import { GitHubProvider, type GhExecutor, type SystemExecutor } from '@vibegit/github-provider'
 import type { TestSandbox } from '../helpers'
 import { cleanupSandbox, createSandbox, writeProjectFile } from '../helpers'
 
@@ -50,6 +50,57 @@ describe('GitHubProvider mock contract', () => {
     const remote = await provider.createPrivateRepository(project.id, 'safe-project')
     expect(remote).toBe('https://github.com/test-user/safe-project.git')
     expect(calls).toContainEqual(['repo', 'create', 'test-user/safe-project', '--private'])
+    expect(await sandbox.service.git.getRemoteUrl(sandbox.projectPath, 'vibegit')).toBe(remote)
+  })
+
+  it('opens browser authorization, creates an app-owned SSH key, and uses SSH 443 for a new Private repository', async () => {
+    sandbox = await createSandbox()
+    const publicKey = 'ssh-ed25519 AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA='
+    const calls: string[][] = []
+    const environments: NodeJS.ProcessEnv[] = []
+    let authenticated = false
+    let registered = false
+    const executor: GhExecutor = vi.fn(async (_cwd, args, _options, environment) => {
+      calls.push(args)
+      environments.push(environment)
+      if (args[0] === '--version') return { exitCode: 0, stdout: 'gh version 2.0.0\n', stderr: '' }
+      if (args[0] === 'auth' && args[1] === 'status') return { exitCode: authenticated ? 0 : 1, stdout: '', stderr: '' }
+      if (args[0] === 'auth' && args[1] === 'login') { authenticated = true; return { exitCode: 0, stdout: '', stderr: '' } }
+      if (args[0] === 'api' && args.includes('user/keys')) return { exitCode: 0, stdout: registered ? `${publicKey}\n` : '', stderr: '' }
+      if (args[0] === 'api') return { exitCode: 0, stdout: 'test-user\n', stderr: '' }
+      if (args[0] === 'ssh-key' && args[1] === 'add') { registered = true; return { exitCode: 0, stdout: '', stderr: '' } }
+      if (args[0] === 'repo' && args[1] === 'view') return { exitCode: 0, stdout: 'PRIVATE\n', stderr: '' }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+    const systemExecutor: SystemExecutor = vi.fn(async (executable, _cwd, args) => {
+      if (executable === 'ssh-keygen' && args.includes('-f')) {
+        const keyPath = args[args.indexOf('-f') + 1]!
+        await writeFile(keyPath, 'private key material stays local\n', 'utf8')
+        await writeFile(`${keyPath}.pub`, `${publicKey} vibegit-backup\n`, 'utf8')
+      }
+      return { exitCode: 0, stdout: '', stderr: '' }
+    })
+    const provider = new GitHubProvider(sandbox.service.database, sandbox.service.git, sandbox.service.checkpoints, {
+      executor,
+      systemExecutor,
+      dataDirectory: sandbox.dataDirectory
+    })
+
+    const onboarding = await provider.authorizeAndProvisionSshKey(sandbox.projectPath)
+    expect(onboarding).toMatchObject({ username: 'test-user', sshKeyCreated: true })
+    expect(JSON.stringify(onboarding)).not.toContain('private key material')
+    expect(calls).toContainEqual([
+      'auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'ssh', '--skip-ssh-key',
+      '--scopes', 'repo,read:org,admin:public_key'
+    ])
+    const loginIndex = calls.findIndex((args) => args[0] === 'auth' && args[1] === 'login')
+    expect(environments[loginIndex]?.GH_PROMPT_DISABLED).toBeUndefined()
+    expect(calls).toContainEqual(['ssh-key', 'add', expect.any(String), '--title', 'VibeGit backup key', '--type', 'authentication'])
+
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    await sandbox.service.initializeProtection(project.id)
+    const remote = await provider.createPrivateRepository(project.id, 'ssh-backed-project')
+    expect(remote).toBe('ssh://git@ssh.github.com:443/test-user/ssh-backed-project.git')
     expect(await sandbox.service.git.getRemoteUrl(sandbox.projectPath, 'vibegit')).toBe(remote)
   })
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../apps/desktop/src/renderer/App'
@@ -74,6 +74,7 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     createShelf: vi.fn(() => success<ShelvedChange>({ id: 'shelf-1', projectId: project.id, checkpointId: checkpoint.id, restoreId: 'restore-1', title: '未完成修改', createdAt: new Date().toISOString(), status: 'active' })),
     retrieveShelf: vi.fn(() => success<ShelvedChange>({ id: 'shelf-1', projectId: project.id, checkpointId: checkpoint.id, restoreId: 'restore-1', title: '未完成修改', createdAt: new Date().toISOString(), retrievedAt: new Date().toISOString(), status: 'retrieved' })),
     githubStatus: vi.fn(() => success({ installed: false, authenticated: false, message: '未安装' })),
+    githubAuthorize: vi.fn(() => success({ username: 'test-user', sshKeyCreated: true, message: 'GitHub 已连接，已创建并注册 VibeGit 专用 SSH 密钥' })),
     githubScan: vi.fn(() => success({ scannedAt: new Date().toISOString(), scannedFiles: 1, blocked: false, risks: [] })),
     githubCreatePrivate: vi.fn(() => success(project)),
     githubConnect: vi.fn(() => success(project)),
@@ -89,7 +90,6 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
 describe('VibeGit UI flow', () => {
   beforeEach(() => { window.vibegit = mockApi() })
   afterEach(() => {
-    delete window.vibegitRuntime
     cleanup()
   })
 
@@ -99,20 +99,48 @@ describe('VibeGit UI flow', () => {
     expect(screen.getByRole('button', { name: /选择项目文件夹/ })).toBeEnabled()
   })
 
-  it('accepts a project path in browser compatibility mode', async () => {
-    const api = mockApi()
+  it('explains that browser compatibility mode cannot select a local folder', async () => {
+    const api = mockApi({
+      selectProjectDirectory: vi.fn(() => Promise.resolve<ApiResult<string | null>>({
+        ok: false,
+        error: {
+          code: 'BROWSER_FOLDER_PICKER_UNAVAILABLE',
+          message: '浏览器兼容模式无法安全读取电脑中的文件夹路径',
+          remediation: '请使用 VibeGit 桌面版启动程序，然后点击“选择项目文件夹”。',
+          retryable: false
+        }
+      }))
+    })
     window.vibegit = api
-    window.vibegitRuntime = 'browser'
     const user = userEvent.setup()
     render(<App />)
 
     await user.click(await screen.findByRole('button', { name: /选择项目文件夹/ }))
-    const dialog = await screen.findByRole('dialog', { name: '添加本地项目' })
-    const pathInput = within(dialog).getByRole('textbox', { name: '项目文件夹完整路径' })
-    await user.type(pathInput, 'D:\\测试项目')
-    await user.click(within(dialog).getByRole('button', { name: '添加项目' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('浏览器兼容模式无法安全读取电脑中的文件夹路径')
+    expect(api.addProject).not.toHaveBeenCalled()
+  })
 
-    await waitFor(() => expect(api.addProject).toHaveBeenCalledWith({ path: 'D:\\测试项目' }))
+  it('starts GitHub browser authorization and SSH setup from one button', async () => {
+    const api = mockApi({
+      listProjects: vi.fn(() => success([project])),
+      listCheckpoints: vi.fn(() => success([checkpoint])),
+      githubStatus: vi.fn(() => success({
+        installed: true,
+        authenticated: false,
+        sshKeyReady: false,
+        message: '尚未连接 GitHub；点击下方按钮即可在浏览器中授权'
+      }))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    const projectButtons = await screen.findAllByRole('button', { name: /我的 AI 项目/ })
+    await user.click(projectButtons.at(-1)!)
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    await user.click(await screen.findByRole('button', { name: '连接 GitHub 并创建 SSH 密钥' }))
+
+    await waitFor(() => expect(api.githubAuthorize).toHaveBeenCalledTimes(1))
   })
 
   it('opens a real checkpoint diff and completes the confirmed restore/undo flow', async () => {

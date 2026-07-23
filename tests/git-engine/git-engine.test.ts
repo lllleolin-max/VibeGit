@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { GitCommandRunner, GitEngine } from '@vibegit/git-engine'
 import { VibeGitError } from '@vibegit/shared'
 
@@ -114,6 +114,40 @@ describe('GitEngine', () => {
       else process.env.GIT_INDEX_FILE = originalIndex
       await rm(root, { recursive: true, force: true })
       await rm(other, { recursive: true, force: true })
+    }
+  })
+
+  it('uses an explicit SSH command only for a trusted SSH backup transport', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-ssh-transport-'))
+    const bareRemote = join(root, 'remote.git')
+    const remoteUrl = 'ssh://git@ssh.github.com:443/test-user/backup.git'
+    const sshCommand = 'ssh -i "C:/VibeGit/ssh/key" -o IdentitiesOnly=yes -o BatchMode=yes'
+    const git = new GitEngine()
+    try {
+      await git.initialize(root)
+      await writeFile(join(root, 'README.md'), '# Safe export\n', 'utf8')
+      await git.runner.run(root, ['add', '--', 'README.md'])
+      await git.runner.run(root, ['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', 'commit', '-m', 'base'])
+      const objectId = (await git.runner.run(root, ['rev-parse', 'HEAD'])).stdout.trim()
+      await mkdir(bareRemote, { recursive: true })
+      await git.runner.run(bareRemote, ['init', '--bare'])
+
+      const originalRun = git.runner.run.bind(git.runner)
+      const run = vi.spyOn(git.runner, 'run').mockImplementation(async (cwd, args, options) => {
+        const networkOperation = args[0] === 'fetch' || args[0] === 'push' ||
+          (args[0] === 'ls-remote' && !args.includes('--get-url'))
+        const routedArgs = networkOperation ? args.map((argument) => argument === remoteUrl ? bareRemote : argument) : [...args]
+        return await originalRun(cwd, routedArgs, options)
+      })
+
+      await git.pushCheckpoint(root, objectId, remoteUrl, 'vibegit-backup', { sshCommand })
+      const remoteCalls = run.mock.calls.filter(([, args]) =>
+        args[0] === 'fetch' || args[0] === 'push' || (args[0] === 'ls-remote' && !args.includes('--get-url'))
+      )
+      expect(remoteCalls).not.toHaveLength(0)
+      expect(remoteCalls.every(([, , options]) => options?.env?.GIT_SSH_COMMAND === sshCommand)).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

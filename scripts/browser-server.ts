@@ -41,7 +41,11 @@ async function openDirectory(path: string): Promise<boolean> {
 
 const actions: Record<keyof VibeGitApi, (args: unknown[]) => unknown | Promise<unknown>> = {
   health: () => service.health(),
-  selectProjectDirectory: () => null,
+  selectProjectDirectory: () => {
+    throw new VibeGitError('BROWSER_FOLDER_PICKER_UNAVAILABLE', '浏览器兼容模式无法安全读取电脑中的文件夹路径', {
+      remediation: '请使用 VibeGit 桌面版启动程序，然后点击“选择项目文件夹”。'
+    })
+  },
   listProjects: () => service.listProjects(),
   addProject: (args) => service.addProject(argument<AddProjectInput>(args, 0)),
   refreshProject: (args) => service.refreshProject(argument<string>(args, 0)),
@@ -62,6 +66,7 @@ const actions: Record<keyof VibeGitApi, (args: unknown[]) => unknown | Promise<u
   createShelf: (args) => service.createShelf(argument<string>(args, 0), argument<string>(args, 1)),
   retrieveShelf: (args) => service.retrieveShelf(argument<string>(args, 0)),
   githubStatus: () => service.githubStatus(),
+  githubAuthorize: () => service.authorizeGitHub(),
   githubScan: (args) => service.scanSensitiveFiles(argument<string>(args, 0)),
   githubCreatePrivate: (args) => service.createPrivateRepository(argument<CreatePrivateRepositoryInput>(args, 0)),
   githubConnect: (args) => service.connectRemote(argument<ConnectRemoteInput>(args, 0)),

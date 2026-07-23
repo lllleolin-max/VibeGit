@@ -156,6 +156,7 @@ function registerIpc(): void {
   ))
   registerHandler(IPC_CHANNELS.retrieveShelf, (shelfId: string) => requiredService().retrieveShelf(requireString(shelfId, 'shelfId', 100)))
   registerHandler(IPC_CHANNELS.githubStatus, () => requiredService().githubStatus())
+  registerHandler(IPC_CHANNELS.githubAuthorize, () => requiredService().authorizeGitHub())
   registerHandler(IPC_CHANNELS.githubScan, (projectId: string) => requiredService().scanSensitiveFiles(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.githubCreatePrivate, (input: CreatePrivateRepositoryInput) => {
     const record = requireRecord(input, 'input')

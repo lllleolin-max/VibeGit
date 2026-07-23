@@ -1,7 +1,6 @@
 import {
   VibeGitError,
   fail,
-  ok,
   type ApiResult,
   type VibeGitApi
 } from '@vibegit/shared'
@@ -30,10 +29,7 @@ const browserWindow = window as unknown as Window & { vibegit?: VibeGitApi }
 if (!browserWindow.vibegit) {
   const api: VibeGitApi = {
     health: () => invoke('health'),
-    selectProjectDirectory: async () => {
-      const path = window.prompt('请输入或粘贴项目文件夹的完整路径：', 'D:\\')
-      return ok(path?.trim() || null)
-    },
+    selectProjectDirectory: () => invoke('selectProjectDirectory'),
     listProjects: () => invoke('listProjects'),
     addProject: (input) => invoke('addProject', [input]),
     refreshProject: (projectId) => invoke('refreshProject', [projectId]),
@@ -51,6 +47,7 @@ if (!browserWindow.vibegit) {
     createShelf: (projectId, title) => invoke('createShelf', [projectId, title]),
     retrieveShelf: (shelfId) => invoke('retrieveShelf', [shelfId]),
     githubStatus: () => invoke('githubStatus'),
+    githubAuthorize: () => invoke('githubAuthorize'),
     githubScan: (projectId) => invoke('githubScan', [projectId]),
     githubCreatePrivate: (input) => invoke('githubCreatePrivate', [input]),
     githubConnect: (input) => invoke('githubConnect', [input]),
@@ -61,5 +58,4 @@ if (!browserWindow.vibegit) {
     getSettings: () => invoke('getSettings')
   }
   browserWindow.vibegit = api
-  browserWindow.vibegitRuntime = 'browser'
 }
