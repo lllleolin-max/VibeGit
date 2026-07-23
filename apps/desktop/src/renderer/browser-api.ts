@@ -1,6 +1,7 @@
 import {
   VibeGitError,
   fail,
+  ok,
   type ApiResult,
   type VibeGitApi
 } from '@vibegit/shared'
@@ -53,6 +54,9 @@ if (!browserWindow.vibegit) {
     githubConnect: (input) => invoke('githubConnect', [input]),
     githubPush: (projectId) => invoke('githubPush', [projectId]),
     githubIgnoreRisk: (projectId, risk) => invoke('githubIgnoreRisk', [projectId, risk]),
+    minimizeWindow: () => Promise.resolve(ok(true)),
+    toggleMaximizeWindow: () => Promise.resolve(ok(true)),
+    closeWindow: () => Promise.resolve(ok(true)),
     agentStatus: () => invoke('agentStatus'),
     listAgentEvents: (projectId) => invoke('listAgentEvents', [projectId]),
     getSettings: () => invoke('getSettings')

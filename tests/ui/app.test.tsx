@@ -80,6 +80,9 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     githubConnect: vi.fn(() => success(project)),
     githubPush: vi.fn(() => success({ remoteUrl: 'https://github.com/test/repo.git', checkpointId: checkpoint.id, syncedAt: new Date().toISOString(), branch: 'vibegit-backup' })),
     githubIgnoreRisk: vi.fn(() => success({ scannedAt: new Date().toISOString(), scannedFiles: 1, blocked: false, risks: [] })),
+    minimizeWindow: vi.fn(() => success(true)),
+    toggleMaximizeWindow: vi.fn(() => success(true)),
+    closeWindow: vi.fn(() => success(true)),
     agentStatus: vi.fn(() => success(agentStatus)),
     listAgentEvents: vi.fn(() => success([])),
     getSettings: vi.fn(() => success({ dataDirectory: 'C:\\VibeGit', commandTimeoutMs: 20_000 })),
@@ -88,7 +91,12 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
 }
 
 describe('VibeGit UI flow', () => {
-  beforeEach(() => { window.vibegit = mockApi() })
+  beforeEach(() => {
+    window.localStorage.clear()
+    document.documentElement.lang = 'zh-CN'
+    document.documentElement.dir = 'ltr'
+    window.vibegit = mockApi()
+  })
   afterEach(() => {
     cleanup()
   })
@@ -97,6 +105,43 @@ describe('VibeGit UI flow', () => {
     render(<App />)
     expect(await screen.findByText('先选择一个正在用 AI 开发的文件夹')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /选择项目文件夹/ })).toBeEnabled()
+  })
+
+  it('provides custom frameless window controls', async () => {
+    const api = mockApi()
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: '最小化窗口' }))
+    await user.click(screen.getByRole('button', { name: '最大化或还原窗口' }))
+    await user.click(screen.getByRole('button', { name: '关闭窗口' }))
+
+    expect(api.minimizeWindow).toHaveBeenCalledTimes(1)
+    expect(api.toggleMaximizeWindow).toHaveBeenCalledTimes(1)
+    expect(api.closeWindow).toHaveBeenCalledTimes(1)
+  })
+
+  it('persists the selected display language and switches Arabic to right-to-left layout', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    const languageSelect = await screen.findByLabelText('显示语言')
+    expect(languageSelect).toHaveValue('zh-CN')
+
+    await user.selectOptions(languageSelect, 'ar')
+    expect(window.localStorage.getItem('vibegit.display-language')).toBe('ar')
+    expect(document.documentElement.lang).toBe('ar')
+    expect(document.documentElement.dir).toBe('rtl')
+  })
+
+  it('applies a saved language when the app starts', () => {
+    window.localStorage.setItem('vibegit.display-language', 'ar')
+    render(<App />)
+
+    expect(document.documentElement.lang).toBe('ar')
+    expect(document.documentElement.dir).toBe('rtl')
   })
 
   it('explains that browser compatibility mode cannot select a local folder', async () => {

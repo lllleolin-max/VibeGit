@@ -365,6 +365,9 @@ export const IPC_CHANNELS = {
   githubConnect: 'github:connect',
   githubPush: 'github:push',
   githubIgnoreRisk: 'github:ignore-risk',
+  minimizeWindow: 'window:minimize',
+  toggleMaximizeWindow: 'window:toggle-maximize',
+  closeWindow: 'window:close',
   agentStatus: 'agents:status',
   listAgentEvents: 'agents:list-events',
   getSettings: 'settings:get'
@@ -401,6 +404,9 @@ export interface VibeGitApi {
   githubConnect(input: ConnectRemoteInput): Promise<ApiResult<Project>>
   githubPush(projectId: string): Promise<ApiResult<GitHubSyncResult>>
   githubIgnoreRisk(projectId: string, risk: SensitiveRisk): Promise<ApiResult<SensitiveScanResult>>
+  minimizeWindow(): Promise<ApiResult<boolean>>
+  toggleMaximizeWindow(): Promise<ApiResult<boolean>>
+  closeWindow(): Promise<ApiResult<boolean>>
   agentStatus(): Promise<ApiResult<AgentConnectionStatus>>
   listAgentEvents(projectId: string): Promise<ApiResult<AgentEventRecord[]>>
   getSettings(): Promise<ApiResult<AppSettings>>

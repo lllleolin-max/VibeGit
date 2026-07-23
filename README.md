@@ -38,7 +38,18 @@ pnpm build
 pnpm exec electron .
 ```
 
-也可以直接双击 `启动 VibeGit.cmd`，它会启动 Electron 桌面版。首次使用时点击“选择项目文件夹”，即可通过 Windows 原生文件夹选择器定位项目，无需手输完整路径。VibeGit 会初始化 Git（若需要）并创建初始保存点，不会创建或切换普通分支。若选择的是已有 Git 项目的子目录，应用会提示重新选择项目根目录，以避免越过你选择的范围。
+也可以直接双击 `启动 VibeGit.bat`，它会启动 Electron 桌面版。首次使用时点击“选择项目文件夹”，即可通过 Windows 原生文件夹选择器定位项目，无需手输完整路径。VibeGit 会初始化 Git（若需要）并创建初始保存点，不会创建或切换普通分支。若选择的是已有 Git 项目的子目录，应用会提示重新选择项目根目录，以避免越过你选择的范围。
+
+## Windows 安装包与桌面快捷方式
+
+发布者在仓库根目录运行：
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+安装程序会生成在 `release/` 目录。将其中的 `VibeGit-Setup-<版本>-x64.exe` 上传到 GitHub Release 后，用户只需下载并运行该安装程序；安装完成时会自动创建 **VibeGit** 桌面快捷方式和开始菜单入口，二者都会使用 VibeGit 方形应用图标。卸载应用不会删除用户的 VibeGit 数据目录。
 
 ## Agent 事件 CLI
 

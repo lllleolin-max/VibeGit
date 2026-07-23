@@ -23,6 +23,11 @@ function rendererEntryPath(): string {
   return join(__dirname, '../renderer/index.html')
 }
 
+function applicationIconPath(): string {
+  const root = app.isPackaged ? process.resourcesPath : app.getAppPath()
+  return join(root, 'assets', 'branding', 'vibegit-app-icon-rounded.png')
+}
+
 function developmentRendererUrl(): URL | undefined {
   if (app.isPackaged || process.env.NODE_ENV !== 'development' || !process.env.ELECTRON_RENDERER_URL) return undefined
   try {
@@ -189,6 +194,14 @@ function registerIpc(): void {
       message: '由主进程重新扫描确认'
     })
   })
+  registerHandler(IPC_CHANNELS.minimizeWindow, () => { mainWindow?.minimize(); return true })
+  registerHandler(IPC_CHANNELS.toggleMaximizeWindow, () => {
+    if (!mainWindow) return false
+    if (mainWindow.isMaximized()) mainWindow.unmaximize()
+    else mainWindow.maximize()
+    return true
+  })
+  registerHandler(IPC_CHANNELS.closeWindow, () => { mainWindow?.close(); return true })
   registerHandler(IPC_CHANNELS.agentStatus, () => requiredService().agentStatus())
   registerHandler(IPC_CHANNELS.listAgentEvents, (projectId: string) => requiredService().listAgentEvents(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.getSettings, () => requiredService().settings)
@@ -201,8 +214,12 @@ async function createWindow(): Promise<void> {
     minWidth: 980,
     minHeight: 640,
     show: false,
+    frame: false,
+    titleBarStyle: 'hidden',
+    autoHideMenuBar: true,
     backgroundColor: '#f4f2ed',
     title: 'VibeGit',
+    icon: applicationIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -239,6 +256,7 @@ if (!ownsSingleInstanceLock) {
   })
 
   app.whenReady().then(async () => {
+    app.setAppUserModelId('com.vibegit.desktop')
     const dataDirectory = process.env.VIBEGIT_DATA_DIR || defaultDataDirectory()
     await mkdir(join(dataDirectory, 'logs'), { recursive: true })
     diagnosticsPath = join(dataDirectory, 'logs', 'diagnostics.jsonl')

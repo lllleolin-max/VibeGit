@@ -17,8 +17,11 @@ import {
   GitCompareArrows,
   HardDrive,
   History,
+  Languages,
   LoaderCircle,
   LockKeyhole,
+  Maximize2,
+  Minus,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -33,8 +36,7 @@ import {
   Undo2,
   X
 } from 'lucide-react'
-import appLogo from './assets/vibegit-app-logo.png'
-import projectLogo from './assets/vibegit-project-logo.png'
+import appLogo from './assets/vibegit-app-icon-rounded.png'
 import type {
   AgentEventRecord,
   AgentConnectionStatus,
@@ -59,6 +61,35 @@ type Modal =
   | { kind: 'backup' }
   | { kind: 'shelf' }
   | null
+
+type DisplayLanguage = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'ru' | 'ar'
+
+const DISPLAY_LANGUAGES: ReadonlyArray<{ value: DisplayLanguage; label: string; nativeLabel: string; direction: 'ltr' | 'rtl' }> = [
+  { value: 'zh-CN', label: '简体中文', nativeLabel: '简体中文', direction: 'ltr' },
+  { value: 'zh-TW', label: '繁體中文', nativeLabel: '繁體中文', direction: 'ltr' },
+  { value: 'en', label: 'English', nativeLabel: 'English', direction: 'ltr' },
+  { value: 'ja', label: '日语', nativeLabel: '日本語', direction: 'ltr' },
+  { value: 'ko', label: '韩语', nativeLabel: '한국어', direction: 'ltr' },
+  { value: 'ru', label: '俄语', nativeLabel: 'Русский', direction: 'ltr' },
+  { value: 'ar', label: '阿拉伯语', nativeLabel: 'العربية', direction: 'rtl' }
+]
+
+const LANGUAGE_STORAGE_KEY = 'vibegit.display-language'
+
+function isDisplayLanguage(value: string | null): value is DisplayLanguage {
+  return DISPLAY_LANGUAGES.some((language) => language.value === value)
+}
+
+function savedDisplayLanguage(): DisplayLanguage {
+  const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+  return isDisplayLanguage(saved) ? saved : 'zh-CN'
+}
+
+function applyDisplayLanguage(displayLanguage: DisplayLanguage): void {
+  const language = DISPLAY_LANGUAGES.find((option) => option.value === displayLanguage)!
+  document.documentElement.lang = displayLanguage
+  document.documentElement.dir = language.direction
+}
 
 class ApiError extends Error {
   constructor(readonly error: PublicError) {
@@ -121,6 +152,10 @@ export function App(): ReactNode {
   const [diff, setDiff] = useState<CheckpointDiff>()
   const [diffLoading, setDiffLoading] = useState(false)
   const [modal, setModal] = useState<Modal>(null)
+
+  useEffect(() => {
+    applyDisplayLanguage(savedDisplayLanguage())
+  }, [])
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === selectedId), [projects, selectedId])
 
@@ -303,7 +338,9 @@ export function App(): ReactNode {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-frame">
+      <AppTitleBar />
+      <div className="app-shell">
       <Sidebar
         projects={projects}
         selectedId={selectedId}
@@ -328,7 +365,10 @@ export function App(): ReactNode {
         {loading ? (
           <LoadingView label="正在读取项目保护状态…" />
         ) : page === 'settings' ? (
-          <SettingsView onBack={() => setPage(selectedProject ? 'project' : 'projects')} />
+          <>
+            <SettingsView onBack={() => setPage(selectedProject ? 'project' : 'projects')} />
+            <LanguagePreferences />
+          </>
         ) : page === 'projects' || !selectedProject ? (
           <ProjectsHome projects={projects} busy={busy} onAdd={() => void chooseProject()} onSelect={selectProject} />
         ) : (
@@ -413,8 +453,20 @@ export function App(): ReactNode {
           onError={(value) => setError(errorFrom(value))}
         />
       )}
+      </div>
     </div>
   )
+}
+
+function AppTitleBar(): ReactNode {
+  return <header className="app-titlebar" onDoubleClick={() => void window.vibegit.toggleMaximizeWindow()}>
+    <div className="app-titlebar-brand"><img src={appLogo} alt="" /><span>VibeGit</span></div>
+    <div className="window-controls">
+      <button aria-label="最小化窗口" onClick={() => void window.vibegit.minimizeWindow()}><Minus size={17} /></button>
+      <button aria-label="最大化或还原窗口" onClick={() => void window.vibegit.toggleMaximizeWindow()}><Maximize2 size={15} /></button>
+      <button className="window-close" aria-label="关闭窗口" onClick={() => void window.vibegit.closeWindow()}><X size={17} /></button>
+    </div>
+  </header>
 }
 
 function Sidebar(props: {
@@ -429,9 +481,6 @@ function Sidebar(props: {
 }): ReactNode {
   return (
     <aside className="sidebar">
-      <button className="brand" onClick={props.onProjects}>
-        <img className="brand-logo" src={projectLogo} alt="VibeGit" />
-      </button>
       <nav className="primary-nav" aria-label="主导航">
         <button className={props.page === 'projects' ? 'active' : ''} onClick={props.onProjects}><FolderHeart size={17} />所有项目</button>
       </nav>
@@ -761,6 +810,35 @@ function BackupModal(props: { project: Project; onClose(): void; onProjectChange
       <div className="modal-actions"><button className="button ghost" onClick={props.onClose}>关闭</button><button className="button primary" disabled={!props.project.githubRemoteUrl || !status?.authenticated || scan?.blocked || Boolean(busy)} onClick={() => void push()}>{busy === 'push' ? <LoaderCircle className="spin" size={17} /> : <Cloud size={17} />}安全备份到 GitHub</button></div>
     </div>}
   </ModalFrame>
+}
+
+function LanguagePreferences(): ReactNode {
+  const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>(savedDisplayLanguage)
+
+  useEffect(() => {
+    applyDisplayLanguage(displayLanguage)
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, displayLanguage)
+  }, [displayLanguage])
+
+  return (
+    <section className="page language-preferences-page" aria-labelledby="display-language-heading">
+      <div className="settings-card language-settings-card">
+        <div className="settings-card-title">
+          <Languages size={19} />
+          <div>
+            <h2 id="display-language-heading">界面语言</h2>
+            <p>默认使用简体中文。选择会自动保存；阿拉伯语将采用从右到左的阅读方向。</p>
+          </div>
+        </div>
+        <label className="language-select-label" htmlFor="display-language">
+          显示语言
+          <select id="display-language" value={displayLanguage} onChange={(event) => setDisplayLanguage(event.target.value as DisplayLanguage)}>
+            {DISPLAY_LANGUAGES.map((language) => <option key={language.value} value={language.value}>{language.nativeLabel} · {language.label}</option>)}
+          </select>
+        </label>
+      </div>
+    </section>
+  )
 }
 
 function SettingsView({ onBack }: { onBack(): void }): ReactNode {

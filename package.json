@@ -25,7 +25,46 @@
     "test:cli-e2e": "tsx scripts/cli-e2e.ts",
     "demo": "tsx scripts/demo.ts",
     "build:cli": "tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean",
-    "build": "tsc --noEmit && electron-vite build && tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean"
+    "build": "tsc --noEmit && electron-vite build && tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean",
+    "dist:win": "pnpm build && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.vibegit.desktop",
+    "productName": "VibeGit",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "out/**/*",
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/branding",
+        "to": "assets/branding"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "VibeGit-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VibeGit",
+      "deleteAppDataOnUninstall": false
+    }
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
@@ -39,6 +78,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "5.2.0",
     "electron": "43.1.0",
+    "electron-builder": "^26.15.3",
     "electron-vite": "5.0.0",
     "eslint": "9.39.4",
     "eslint-plugin-react-hooks": "7.1.1",
