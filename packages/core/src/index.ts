@@ -20,6 +20,7 @@ import type {
   HealthStatus,
   Project,
   RecordAgentSummaryInput,
+  RemoveProjectResult,
   RestorePreview,
   RestoreRecord,
   SensitiveRisk,
@@ -181,6 +182,17 @@ export class VibeGitService {
     this.database.upsertProject(project)
     if (input.initialize) return (await this.initializeProtection(project.id)).project
     return project
+  }
+
+  async removeProject(projectId: string): Promise<RemoveProjectResult> {
+    const project = this.requireProject(projectId)
+    const checkpoints = this.database.listCheckpoints(project.id)
+    for (const checkpoint of checkpoints) {
+      try { await this.git.deleteCheckpointRef(project.path, checkpoint.id) }
+      catch { /* If the working repository has moved, still remove VibeGit's local registry. */ }
+    }
+    this.database.deleteProject(project.id)
+    return { projectId: project.id, removedCheckpoints: checkpoints.length }
   }
 
   async initializeProtection(projectId: string): Promise<{ project: Project; checkpoint: Checkpoint }> {

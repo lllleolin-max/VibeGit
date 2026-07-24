@@ -6,6 +6,7 @@ const api: VibeGitApi = {
   selectProjectDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.selectProjectDirectory),
   listProjects: () => ipcRenderer.invoke(IPC_CHANNELS.listProjects),
   addProject: (input) => ipcRenderer.invoke(IPC_CHANNELS.addProject, input),
+  removeProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.removeProject, projectId),
   refreshProject: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.refreshProject, projectId),
   initializeProtection: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.initializeProtection, projectId),
   listCheckpoints: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.listCheckpoints, projectId),

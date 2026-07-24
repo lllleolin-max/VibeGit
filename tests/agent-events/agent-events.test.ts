@@ -72,6 +72,17 @@ describe('Agent events', () => {
     })
   })
 
+  it('removes only VibeGit records when a protected project is removed', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    const initialized = await sandbox.service.initializeProtection(project.id)
+    const result = await sandbox.service.removeProject(project.id)
+    expect(result).toMatchObject({ projectId: project.id, removedCheckpoints: 1 })
+    expect(await sandbox.service.listProjects()).toEqual([])
+    await expect(sandbox.service.git.verifyCommit(sandbox.projectPath, initialized.checkpoint.gitObjectId)).resolves.toBeUndefined()
+  })
+
   it('adapts Hook JSON, redacts prompt secrets, and deduplicates retries', async () => {
     sandbox = await createSandbox()
     await writeProjectFile(sandbox, 'app.ts', 'export const ok = true\n')

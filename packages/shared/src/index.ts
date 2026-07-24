@@ -242,6 +242,11 @@ export interface DataDirectoryUpdateResult {
   restartRequired: boolean
 }
 
+export interface RemoveProjectResult {
+  projectId: string
+  removedCheckpoints: number
+}
+
 export interface EnvironmentCheckResult {
   github: GitHubCliStatus
   agents: AgentConnectionStatus
@@ -371,6 +376,7 @@ export const IPC_CHANNELS = {
   selectProjectDirectory: 'dialog:select-project-directory',
   listProjects: 'projects:list',
   addProject: 'projects:add',
+  removeProject: 'projects:remove',
   refreshProject: 'projects:refresh',
   initializeProtection: 'projects:initialize-protection',
   listCheckpoints: 'checkpoints:list',
@@ -413,6 +419,7 @@ export interface VibeGitApi {
   selectProjectDirectory(): Promise<ApiResult<string | null>>
   listProjects(): Promise<ApiResult<Project[]>>
   addProject(input: AddProjectInput): Promise<ApiResult<Project>>
+  removeProject(projectId: string): Promise<ApiResult<RemoveProjectResult>>
   refreshProject(projectId: string): Promise<ApiResult<Project>>
   initializeProtection(projectId: string): Promise<ApiResult<{ project: Project; checkpoint: Checkpoint }>>
   listCheckpoints(projectId: string): Promise<ApiResult<Checkpoint[]>>

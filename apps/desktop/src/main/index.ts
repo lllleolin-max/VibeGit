@@ -175,6 +175,7 @@ function registerIpc(): void {
     if (record.initialize !== undefined && typeof record.initialize !== 'boolean') throw new Error('initialize is invalid')
     return requiredService().addProject({ path, ...(record.initialize === true ? { initialize: true } : {}) })
   })
+  registerHandler(IPC_CHANNELS.removeProject, (projectId: string) => requiredService().removeProject(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.refreshProject, (projectId: string) => requiredService().refreshProject(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.initializeProtection, (projectId: string) => requiredService().initializeProtection(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.listCheckpoints, (projectId: string) => requiredService().listCheckpoints(requireString(projectId, 'projectId', 100)))

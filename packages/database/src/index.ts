@@ -451,6 +451,19 @@ export class VibeGitDatabase {
     return rows.map(mapProject)
   }
 
+  deleteProject(projectId: string): void {
+    this.transaction(() => {
+      this.db.prepare('DELETE FROM shelves WHERE project_id = ?').run(projectId)
+      this.db.prepare('DELETE FROM agent_events WHERE project_id = ?').run(projectId)
+      this.db.prepare('DELETE FROM restores WHERE project_id = ?').run(projectId)
+      this.db.prepare('UPDATE checkpoints SET parent_checkpoint_id = NULL WHERE project_id = ?').run(projectId)
+      this.db.prepare('DELETE FROM checkpoints WHERE project_id = ?').run(projectId)
+      this.db.prepare('DELETE FROM project_operations WHERE project_id = ?').run(projectId)
+      const result = this.db.prepare('DELETE FROM projects WHERE id = ?').run(projectId)
+      if (Number(result.changes) !== 1) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+    })
+  }
+
   getActiveCheckpoint(projectId: string): Checkpoint | undefined {
     const row = this.db.prepare('SELECT active_checkpoint_id FROM projects WHERE id = ?').get(projectId) as { active_checkpoint_id: string | null } | undefined
     if (row?.active_checkpoint_id) {

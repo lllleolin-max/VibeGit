@@ -33,6 +33,7 @@ import {
   ShieldCheck,
   Sparkles,
   TerminalSquare,
+  Trash2,
   Undo2,
   X
 } from 'lucide-react'
@@ -62,6 +63,7 @@ type Modal =
   | { kind: 'restore'; preview: RestorePreview; checkpoint: Checkpoint }
   | { kind: 'backup' }
   | { kind: 'shelf' }
+  | { kind: 'remove-project'; project: Project }
   | null
 
 type DisplayLanguage = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'ru' | 'ar'
@@ -170,6 +172,39 @@ const UI_TRANSLATIONS: Record<string, TranslationSet> = {
   , '默认使用简体中文。选择会自动保存；阿拉伯语将采用从右到左的阅读方向。': { 'zh-TW': '預設使用簡體中文。選擇會自動儲存；阿拉伯語將採用由右至左的閱讀方向。', en: 'Simplified Chinese is the default. Your choice saves automatically; Arabic uses right-to-left reading direction.', ja: '既定は簡体中国語です。選択は自動保存され、アラビア語は右から左の方向で表示されます。', ko: '기본 언어는 중국어 간체이며 선택은 자동 저장됩니다. 아랍어는 오른쪽에서 왼쪽 방향을 사용합니다.', ru: 'По умолчанию используется упрощенный китайский. Выбор сохраняется автоматически; для арабского используется направление справа налево.', ar: 'الصينية المبسطة هي الإعداد الافتراضي. يتم حفظ اختيارك تلقائيًا؛ وتستخدم العربية اتجاه القراءة من اليمين إلى اليسار.' }
   , '选择保存保护记录、诊断日志和 VibeGit 专用 SSH 数据的本地文件夹。': { 'zh-TW': '選擇儲存保護記錄、診斷日誌和 VibeGit 專用 SSH 資料的本機資料夾。', en: 'Choose the local folder for protection records, diagnostic logs, and VibeGit SSH data.', ja: '保護記録、診断ログ、VibeGit 専用 SSH データを保存するローカルフォルダーを選びます。', ko: '보호 기록, 진단 로그 및 VibeGit 전용 SSH 데이터를 저장할 로컬 폴더를 선택합니다.', ru: 'Выберите локальную папку для записей защиты, диагностических журналов и данных SSH VibeGit.', ar: 'اختر المجلد المحلي لسجلات الحماية وسجلات التشخيص وبيانات SSH الخاصة بـ VibeGit.' }
   , '扫描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。': { 'zh-TW': '掃描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 時會透過 Windows 套件管理員自動安裝。', en: 'Check GitHub CLI, Codex, and Claude Code. If GitHub CLI is missing, Windows Package Manager installs it automatically.', ja: 'GitHub CLI、Codex、Claude Code を確認します。GitHub CLI がない場合は Windows パッケージ マネージャーで自動インストールします。', ko: 'GitHub CLI, Codex 및 Claude Code를 확인합니다. GitHub CLI가 없으면 Windows 패키지 관리자가 자동 설치합니다.', ru: 'Проверьте GitHub CLI, Codex и Claude Code. Если GitHub CLI отсутствует, диспетчер пакетов Windows установит его автоматически.', ar: 'تحقق من GitHub CLI وCodex وClaude Code. إذا لم يكن GitHub CLI موجودًا، فسيقوم مدير حزم Windows بتثبيته تلقائيًا.' }
+  , '本地保存引擎正常': { 'zh-TW': '本機儲存引擎正常', en: 'Local save engine is ready', ja: 'ローカル保存エンジンは正常です', ko: '로컬 저장 엔진이 정상입니다', ru: 'Локальный движок сохранения готов', ar: 'محرك الحفظ المحلي جاهز' }
+  , '未找到 Git': { 'zh-TW': '未找到 Git', en: 'Git not found', ja: 'Git が見つかりません', ko: 'Git을 찾을 수 없음', ru: 'Git не найден', ar: 'لم يتم العثور على Git' }
+  , '状态检查失败': { 'zh-TW': '狀態檢查失敗', en: 'Status check failed', ja: '状態確認に失敗しました', ko: '상태 확인 실패', ru: 'Не удалось проверить состояние', ar: 'فشل فحص الحالة' }
+  , '读取中…': { 'zh-TW': '讀取中…', en: 'Loading…', ja: '読み込み中…', ko: '불러오는 중…', ru: 'Загрузка…', ar: 'جارٍ التحميل…' }
+  , '未连接': { 'zh-TW': '未連線', en: 'Not connected', ja: '未接続', ko: '연결되지 않음', ru: 'Не подключено', ar: 'غير متصل' }
+  , '正在检测…': { 'zh-TW': '正在檢測…', en: 'Checking…', ja: '確認中…', ko: '확인 중…', ru: 'Проверка…', ar: 'جارٍ الفحص…' }
+  , '未在 PATH 中检测到 Codex CLI': { 'zh-TW': '未在 PATH 中偵測到 Codex CLI', en: 'Codex CLI was not found in PATH', ja: 'PATH に Codex CLI が見つかりません', ko: 'PATH에서 Codex CLI를 찾지 못했습니다', ru: 'Codex CLI не найден в PATH', ar: 'لم يتم العثور على Codex CLI في PATH' }
+  , '未在 PATH 中检测到 Claude Code': { 'zh-TW': '未在 PATH 中偵測到 Claude Code', en: 'Claude Code was not found in PATH', ja: 'PATH に Claude Code が見つかりません', ko: 'PATH에서 Claude Code를 찾지 못했습니다', ru: 'Claude Code не найден в PATH', ar: 'لم يتم العثور على Claude Code في PATH' }
+  , '检测到 Codex；事件 CLI 模板可用': { 'zh-TW': '偵測到 Codex；事件 CLI 範本可用', en: 'Codex detected; event CLI template is available', ja: 'Codex を検出しました。イベント CLI テンプレートを利用できます', ko: 'Codex가 감지되었습니다. 이벤트 CLI 템플릿을 사용할 수 있습니다', ru: 'Codex обнаружен; доступен шаблон CLI событий', ar: 'تم اكتشاف Codex؛ قالب CLI للأحداث متاح' }
+  , '检测到 Claude Code；事件 CLI 模板可用': { 'zh-TW': '偵測到 Claude Code；事件 CLI 範本可用', en: 'Claude Code detected; event CLI template is available', ja: 'Claude Code を検出しました。イベント CLI テンプレートを利用できます', ko: 'Claude Code가 감지되었습니다. 이벤트 CLI 템플릿을 사용할 수 있습니다', ru: 'Claude Code обнаружен; доступен шаблон CLI событий', ar: 'تم اكتشاف Claude Code؛ قالب CLI событий доступен' }
+  , '回退前自动保险': { 'zh-TW': '回退前自動保險', en: 'Create a safety point before restore', ja: '復元前に安全ポイントを作成', ko: '복원 전 안전 지점 만들기', ru: 'Создавать страховочную точку перед восстановлением', ar: 'إنشاء نقطة أمان قبل الاستعادة' }
+  , '不删除未跟踪文件': { 'zh-TW': '不刪除未追蹤檔案', en: 'Never delete untracked files', ja: '未追跡ファイルを削除しない', ko: '추적되지 않은 파일을 삭제하지 않음', ru: 'Не удалять неотслеживаемые файлы', ar: 'عدم حذف الملفات غير المتعقبة' }
+  , '禁止强制推送': { 'zh-TW': '禁止強制推送', en: 'Block force pushes', ja: '強制プッシュを禁止', ko: '강제 푸시 차단', ru: 'Блокировать принудительные отправки', ar: 'حظر الدفع القسري' }
+  , '上传前扫描敏感文件': { 'zh-TW': '上傳前掃描敏感檔案', en: 'Scan sensitive files before upload', ja: 'アップロード前に機密ファイルをスキャン', ko: '업로드 전 민감한 파일 검사', ru: 'Проверять конфиденциальные файлы перед отправкой', ar: 'فحص الملفات الحساسة قبل الرفع' }
+  , 'Renderer 无文件系统权限': { 'zh-TW': 'Renderer 無檔案系統權限', en: 'Renderer has no file system access', ja: 'Renderer にファイルシステム権限はありません', ko: 'Renderer에 파일 시스템 권한이 없습니다', ru: 'У Renderer нет доступа к файловой системе', ar: 'لا يملك Renderer صلاحية الوصول إلى نظام الملفات' }
+  , 'Git 命令有超时限制': { 'zh-TW': 'Git 命令有逾時限制', en: 'Git commands have a timeout limit', ja: 'Git コマンドにはタイムアウト制限があります', ko: 'Git 명령에는 시간 제한이 있습니다', ru: 'Для команд Git задано ограничение времени', ar: 'أوامر Git لها حد زمني' }
+  , '源码只保存在你的电脑和你选择的 GitHub 仓库': { 'zh-TW': '原始碼只保存在你的電腦和你選擇的 GitHub 儲存庫', en: 'Source code stays only on your computer and in the GitHub repository you choose', ja: 'ソースコードはあなたのコンピューターと選択した GitHub リポジトリにのみ保存されます', ko: '소스 코드는 내 컴퓨터와 선택한 GitHub 저장소에만 보관됩니다', ru: 'Исходный код остается только на вашем компьютере и в выбранном репозитории GitHub', ar: 'يبقى الكود المصدري على جهازك وفي مستودع GitHub الذي تختاره فقط' }
+  , '你的本地项目': { 'zh-TW': '你的本機專案', en: 'Your local projects', ja: 'ローカルプロジェクト', ko: '내 로컬 프로젝트', ru: 'Ваши локальные проекты', ar: 'مشاريعك المحلية' }
+  , '每次 AI 修改，都能放心找回来。': { 'zh-TW': '每次 AI 修改，都能放心找回來。', en: 'Find your way back after every AI change.', ja: 'AI による変更も、いつでも安心して戻せます。', ko: 'AI가 수정할 때마다 안심하고 되돌릴 수 있습니다.', ru: 'После каждого изменения ИИ можно спокойно вернуться назад.', ar: 'يمكنك الرجوع بأمان بعد كل تغيير يجريه الذكاء الاصطناعي.' }
+  , 'VibeGit 在本机保存可理解的版本，并在你允许时备份到 GitHub。': { 'zh-TW': 'VibeGit 在本機儲存易於理解的版本，並在你允許時備份到 GitHub。', en: 'VibeGit keeps understandable versions locally and backs them up to GitHub only when you allow it.', ja: 'VibeGit は分かりやすいバージョンをローカルに保存し、許可した場合のみ GitHub にバックアップします。', ko: 'VibeGit은 이해하기 쉬운 버전을 로컬에 보관하고 허용할 때만 GitHub에 백업합니다.', ru: 'VibeGit хранит понятные версии локально и делает резервную копию на GitHub только с вашего разрешения.', ar: 'يحتفظ VibeGit بإصدارات مفهومة محليًا ويجري نسخها احتياطيًا إلى GitHub فقط عندما تسمح بذلك.' }
+  , '添加本地项目': { 'zh-TW': '新增本機專案', en: 'Add local project', ja: 'ローカルプロジェクトを追加', ko: '로컬 프로젝트 추가', ru: 'Добавить локальный проект', ar: 'إضافة مشروع محلي' }
+  , '添加另一个项目': { 'zh-TW': '新增另一個專案', en: 'Add another project', ja: '別のプロジェクトを追加', ko: '다른 프로젝트 추가', ru: 'Добавить другой проект', ar: 'إضافة مشروع آخر' }
+  , '选择本地文件夹': { 'zh-TW': '選擇本機資料夾', en: 'Choose a local folder', ja: 'ローカルフォルダーを選択', ko: '로컬 폴더 선택', ru: 'Выбрать локальную папку', ar: 'اختر مجلدًا محليًا' }
+  , '尚未设置 GitHub 备份': { 'zh-TW': '尚未設定 GitHub 備份', en: 'GitHub backup not set up', ja: 'GitHub バックアップは未設定', ko: 'GitHub 백업이 설정되지 않음', ru: 'Резервное копирование GitHub не настроено', ar: 'لم يتم إعداد النسخ الاحتياطي على GitHub' }
+  , '有尚未保存的修改': { 'zh-TW': '有尚未儲存的修改', en: 'Unsaved changes', ja: '未保存の変更があります', ko: '저장되지 않은 변경 사항', ru: 'Есть несохраненные изменения', ar: 'توجد تغييرات غير محفوظة' }
+  , '管理项目备份': { 'zh-TW': '管理專案備份', en: 'Manage project backups', ja: 'プロジェクトのバックアップを管理', ko: '프로젝트 백업 관리', ru: 'Управление резервными копиями проектов', ar: 'إدارة النسخ الاحتياطية للمشاريع' }
+  , '结束管理项目': { 'zh-TW': '結束管理專案', en: 'Finish managing projects', ja: 'プロジェクト管理を終了', ko: '프로젝트 관리 종료', ru: 'Завершить управление проектами', ar: 'إنهاء إدارة المشاريع' }
+  , '删除本地备份': { 'zh-TW': '刪除本機備份', en: 'Delete local backup', ja: 'ローカルバックアップを削除', ko: '로컬 백업 삭제', ru: 'Удалить локальную резервную копию', ar: 'حذف النسخة الاحتياطية المحلية' }
+  , '删除本地备份记录': { 'zh-TW': '刪除本機備份記錄', en: 'Delete local backup records', ja: 'ローカルバックアップ記録を削除', ko: '로컬 백업 기록 삭제', ru: 'Удалить локальные записи резервного копирования', ar: 'حذف سجلات النسخ الاحتياطية المحلية' }
+  , '这会把该项目从 VibeGit 的项目列表中移除。': { 'zh-TW': '這會把該專案從 VibeGit 的專案清單中移除。', en: 'This removes the project from VibeGit’s project list.', ja: 'このプロジェクトを VibeGit のプロジェクト一覧から削除します。', ko: '이 프로젝트를 VibeGit 프로젝트 목록에서 제거합니다.', ru: 'Это удалит проект из списка проектов VibeGit.', ar: 'سيؤدي ذلك إلى إزالة المشروع من قائمة مشاريع VibeGit.' }
+  , '将删除本地 VibeGit 保存点和操作记录': { 'zh-TW': '將刪除本機 VibeGit 儲存點和操作記錄', en: 'Local VibeGit checkpoints and activity history will be deleted', ja: 'ローカルの VibeGit 保存ポイントと操作履歴が削除されます', ko: '로컬 VibeGit 저장 지점과 작업 기록이 삭제됩니다', ru: 'Будут удалены локальные точки сохранения и история действий VibeGit', ar: 'سيتم حذف نقاط الحفظ المحلية وسجل النشاط في VibeGit' }
+  , '不会删除你的项目文件、Git 仓库，也不会删除 GitHub 上已有的备份。': { 'zh-TW': '不會刪除你的專案檔案、Git 儲存庫，也不會刪除 GitHub 上已有的備份。', en: 'Your project files, Git repository, and existing GitHub backups will not be deleted.', ja: 'プロジェクトファイル、Git リポジトリ、既存の GitHub バックアップは削除されません。', ko: '프로젝트 파일, Git 저장소 및 기존 GitHub 백업은 삭제되지 않습니다.', ru: 'Ваши файлы проекта, репозиторий Git и существующие резервные копии GitHub удалены не будут.', ar: 'لن يتم حذف ملفات مشروعك أو مستودع Git أو النسخ الاحتياطية الموجودة على GitHub.' }
+  , '我了解：这只会删除 VibeGit 的本地备份记录': { 'zh-TW': '我了解：這只會刪除 VibeGit 的本機備份記錄', en: 'I understand: this deletes only VibeGit local backup records', ja: '理解しました：VibeGit のローカルバックアップ記録のみを削除します', ko: '이해했습니다: VibeGit 로컬 백업 기록만 삭제됩니다', ru: 'Я понимаю: будут удалены только локальные записи резервного копирования VibeGit', ar: 'أفهم: سيؤدي هذا إلى حذف سجلات النسخ الاحتياطية المحلية لـ VibeGit فقط' }
 }
 
 function translateVisibleUi(language: DisplayLanguage): void {
@@ -183,10 +218,22 @@ function translateVisibleUi(language: DisplayLanguage): void {
     const translated = language === 'zh-CN' ? original : UI_TRANSLATIONS[original]?.[language]
     const checkpointCount = original.match(/^(\d+) 个保存点$/)
     const fileCount = original.match(/^(\d+) 个文件$/)
+    const seconds = original.match(/^(\d+) 秒$/)
+    const recentSave = original.match(/^最近保存 (.+)$/)
+    const changedBy = original.match(/^由 (.+)$/)
+    const removeBackup = original.match(/^删除 (.+) 的本地备份$/)
     const dynamicTranslation: Partial<Record<DisplayLanguage, string>> = checkpointCount ? {
       'zh-TW': `${checkpointCount[1]} 個儲存點`, en: `${checkpointCount[1]} checkpoints`, ja: `${checkpointCount[1]} 個の保存ポイント`, ko: `${checkpointCount[1]}개의 저장 지점`, ru: `${checkpointCount[1]} точек сохранения`, ar: `${checkpointCount[1]} نقاط حفظ`
     } : fileCount ? {
       'zh-TW': `${fileCount[1]} 個檔案`, en: `${fileCount[1]} files`, ja: `${fileCount[1]} 個のファイル`, ko: `${fileCount[1]}개 파일`, ru: `${fileCount[1]} файлов`, ar: `${fileCount[1]} ملفات`
+    } : seconds ? {
+      'zh-TW': `${seconds[1]} 秒`, en: `${seconds[1]} seconds`, ja: `${seconds[1]} 秒`, ko: `${seconds[1]}초`, ru: `${seconds[1]} сек.`, ar: `${seconds[1]} ثانية`
+    } : recentSave ? {
+      'zh-TW': `最近儲存 ${recentSave[1]}`, en: `Last saved ${recentSave[1]}`, ja: `最終保存 ${recentSave[1]}`, ko: `최근 저장 ${recentSave[1]}`, ru: `Последнее сохранение: ${recentSave[1]}`, ar: `آخر حفظ ${recentSave[1]}`
+    } : changedBy ? {
+      'zh-TW': `由 ${changedBy[1]}`, en: `by ${changedBy[1]}`, ja: `${changedBy[1]} による変更`, ko: `${changedBy[1]}의 변경`, ru: `изменено: ${changedBy[1]}`, ar: `بواسطة ${changedBy[1]}`
+    } : removeBackup ? {
+      'zh-TW': `刪除 ${removeBackup[1]} 的本機備份`, en: `Delete ${removeBackup[1]} local backup`, ja: `${removeBackup[1]} のローカルバックアップを削除`, ko: `${removeBackup[1]}의 로컬 백업 삭제`, ru: `Удалить локальную резервную копию ${removeBackup[1]}`, ar: `حذف النسخة الاحتياطية المحلية لـ ${removeBackup[1]}`
     } : {}
     const nextValue = translated ?? dynamicTranslation[language] ?? original
     if (node.data !== nextValue) node.data = nextValue
@@ -401,6 +448,30 @@ export function App(): ReactNode {
     setPage('project')
   }
 
+  const removeProject = async (project: Project): Promise<void> => {
+    setBusy(`remove-${project.id}`)
+    setError(undefined)
+    try {
+      const result = unwrap(await window.vibegit.removeProject(project.id))
+      const remaining = await loadProjects()
+      if (selectedId === project.id) {
+        setSelectedCheckpoint(undefined)
+        setDiff(undefined)
+        setCheckpoints([])
+        setAgentEvents([])
+        setFailedRestores([])
+        setSelectedId(remaining[0]?.id)
+        setPage(remaining[0] ? 'project' : 'projects')
+      }
+      setModal(null)
+      setNotice({ message: `已移除“${project.name}”的 ${result.removedCheckpoints} 个本地保存点；项目文件没有删除。` })
+    } catch (value) {
+      setError(errorFrom(value))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const initializeProtection = async (): Promise<void> => {
     if (!selectedProject) return
     setBusy('initialize')
@@ -504,6 +575,7 @@ export function App(): ReactNode {
         busy={busy}
         onSelect={selectProject}
         onAdd={() => void chooseProject()}
+        onRemove={(project) => setModal({ kind: 'remove-project', project })}
         onProjects={() => setPage('projects')}
         onSettings={() => setPage('settings')}
       />
@@ -614,6 +686,14 @@ export function App(): ReactNode {
           onError={(value) => setError(errorFrom(value))}
         />
       )}
+      {modal?.kind === 'remove-project' && (
+        <RemoveProjectModal
+          project={modal.project}
+          busy={busy === `remove-${modal.project.id}`}
+          onClose={() => setModal(null)}
+          onConfirm={() => void removeProject(modal.project)}
+        />
+      )}
       </div>
     </div>
   )
@@ -637,21 +717,26 @@ function Sidebar(props: {
   busy?: string | undefined
   onSelect(project: Project): void
   onAdd(): void
+  onRemove(project: Project): void
   onProjects(): void
   onSettings(): void
 }): ReactNode {
+  const [managingProjects, setManagingProjects] = useState(false)
   return (
     <aside className="sidebar">
       <nav className="primary-nav" aria-label="主导航">
         <button className={props.page === 'projects' ? 'active' : ''} onClick={props.onProjects}><FolderHeart size={17} />所有项目</button>
       </nav>
-      <div className="sidebar-section-title"><span>最近项目</span><button aria-label="添加项目" onClick={props.onAdd}><Plus size={15} /></button></div>
+      <div className="sidebar-section-title"><span>最近项目</span><span className="sidebar-section-actions"><button aria-label="添加项目" onClick={props.onAdd}><Plus size={15} /></button><button aria-label={managingProjects ? '结束管理项目' : '管理项目备份'} disabled={props.projects.length === 0} className={managingProjects ? 'active' : ''} onClick={() => setManagingProjects((current) => !current)}><Minus size={15} /></button></span></div>
       <div className="project-nav-list">
         {props.projects.length === 0 ? <p className="sidebar-empty">添加第一个项目后，它会出现在这里。</p> : props.projects.map((project) => (
-          <button key={project.id} className={props.selectedId === project.id && props.page === 'project' ? 'active' : ''} onClick={() => props.onSelect(project)}>
-            <span className={`project-dot ${project.hasUnsavedChanges ? 'unsaved' : 'safe'}`} />
-            <span className="project-nav-copy"><strong>{project.name}</strong><small>{project.hasUnsavedChanges ? '有尚未保存的修改' : '当前版本已保存'}</small></span>
-          </button>
+          <div className={`project-nav-row ${props.selectedId === project.id && props.page === 'project' ? 'active' : ''} ${managingProjects ? 'managing' : ''}`} key={project.id}>
+            <button className="project-nav-main" onClick={() => props.onSelect(project)}>
+              <span className={`project-dot ${project.hasUnsavedChanges ? 'unsaved' : 'safe'}`} />
+              <span className="project-nav-copy"><strong>{project.name}</strong><small>{project.hasUnsavedChanges ? '有尚未保存的修改' : '当前版本已保存'}</small></span>
+            </button>
+            {managingProjects && <button className="project-remove-button" aria-label={`删除 ${project.name} 的本地备份`} title="删除本地备份" onClick={() => props.onRemove(project)}><Trash2 size={14} /></button>}
+          </div>
         ))}
       </div>
       <div className="sidebar-footer">
@@ -850,6 +935,15 @@ function SaveModal(props: { project: Project; busy: boolean; onClose(): void; on
   </ModalFrame>
 }
 
+function RemoveProjectModal(props: { project: Project; busy: boolean; onClose(): void; onConfirm(): void }): ReactNode {
+  const [confirmed, setConfirmed] = useState(false)
+  return <ModalFrame danger title={`移除“${props.project.name}”的备份？`} subtitle="这会把该项目从 VibeGit 的项目列表中移除。" onClose={props.onClose}>
+    <div className="remove-project-warning"><ShieldAlert size={20} /><div><strong>将删除本地 VibeGit 保存点和操作记录</strong><p>不会删除你的项目文件、Git 仓库，也不会删除 GitHub 上已有的备份。</p></div></div>
+    <label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我了解：这只会删除 VibeGit 的本地备份记录</label>
+    <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={props.busy}>取消</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}删除本地备份</button></div>
+  </ModalFrame>
+}
+
 function ShelfModal(props: { project: Project; onClose(): void; onChanged(message: string): Promise<void>; onError(value: unknown): void }): ReactNode {
   const [shelves, setShelves] = useState<ShelvedChange[]>([])
   const [title, setTitle] = useState('当前未完成修改')
@@ -1031,7 +1125,7 @@ function ChangePresentationPreferences(): ReactNode {
     window.dispatchEvent(new CustomEvent<ChangePresentation>('vibegit:change-presentation', { detail: presentation }))
   }, [presentation])
 
-  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><Sparkles size={19} /><div><h2>保存点显示方式</h2><p>为非程序员显示大白话的功能变化；也可随时切回完整代码差异。</p></div></div><fieldset className="change-presentation-options"><legend>查看这次改了什么</legend><label className={presentation === 'feature' ? 'active' : ''}><input type="radio" name="change-presentation" value="feature" checked={presentation === 'feature'} onChange={() => setPresentation('feature')} /><span><strong>功能变化</strong><small>新增、改进和删除了哪些功能</small></span></label><label className={presentation === 'code' ? 'active' : ''}><input type="radio" name="change-presentation" value="code" checked={presentation === 'code'} onChange={() => setPresentation('code')} /><span><strong>代码变更</strong><small>文件列表与逐行代码差异</small></span></label></fieldset></div></section>
+  return <section className="page preferences-page"><div className="settings-card preferences-card change-presentation-card"><div className="settings-card-title"><Sparkles size={19} /><div><h2>保存点显示方式</h2><p>为非程序员显示大白话的功能变化；也可随时切回完整代码差异。</p></div></div><fieldset className="change-presentation-options"><legend><strong>查看这次改了什么</strong><span>默认使用功能变化视图</span></legend><label className={presentation === 'feature' ? 'active' : ''}><input type="radio" name="change-presentation" value="feature" checked={presentation === 'feature'} onChange={() => setPresentation('feature')} /><span className="change-presentation-icon"><Sparkles size={17} /></span><span className="change-presentation-copy"><strong>功能变化</strong><small>新增、改进和删除了哪些功能</small></span><span className="change-presentation-indicator"><Check size={14} /></span></label><label className={presentation === 'code' ? 'active' : ''}><input type="radio" name="change-presentation" value="code" checked={presentation === 'code'} onChange={() => setPresentation('code')} /><span className="change-presentation-icon"><FileCode2 size={17} /></span><span className="change-presentation-copy"><strong>代码变更</strong><small>文件列表与逐行代码差异</small></span><span className="change-presentation-indicator"><Check size={14} /></span></label></fieldset></div></section>
 }
 
 function DataDirectoryPreferences(): ReactNode {

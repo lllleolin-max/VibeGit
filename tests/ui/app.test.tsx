@@ -59,6 +59,7 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     selectProjectDirectory: vi.fn(() => success(null)),
     listProjects: vi.fn(() => success([])),
     addProject: vi.fn(() => success(project)),
+    removeProject: vi.fn(() => success({ projectId: project.id, removedCheckpoints: 1 })),
     refreshProject: vi.fn(() => success(project)),
     initializeProtection: vi.fn(() => success({ project, checkpoint })),
     listCheckpoints: vi.fn(() => success([])),
@@ -148,6 +149,8 @@ describe('VibeGit UI flow', () => {
 
     expect(await screen.findByText('All projects')).toBeInTheDocument()
     expect(await screen.findByText('Environment setup')).toBeInTheDocument()
+    expect(await screen.findByText('Local save engine is ready')).toBeInTheDocument()
+    expect(await screen.findByText('Block force pushes')).toBeInTheDocument()
   })
 
   it('translates the timeline labels and dynamic counts after changing language', async () => {
@@ -180,6 +183,22 @@ describe('VibeGit UI flow', () => {
 
     expect(api.setDataDirectory).toHaveBeenCalledWith('D:\\VibeGit Records')
     expect(await screen.findByText(/重启 VibeGit 后会使用该位置/)).toBeInTheDocument()
+  })
+
+  it('shows project backup removal controls only in management mode and requires confirmation', async () => {
+    const api = mockApi({ listProjects: vi.fn(() => success([project])) })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(await screen.findByRole('button', { name: '管理项目备份' }))
+    await user.click(screen.getByRole('button', { name: `删除 ${project.name} 的本地备份` }))
+    expect(await screen.findByRole('dialog', { name: /移除/ })).toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: '删除本地备份' })
+    expect(confirm).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: /我了解/ }))
+    await user.click(confirm)
+    expect(api.removeProject).toHaveBeenCalledWith(project.id)
   })
 
   it('checks the environment and reports detected tools', async () => {

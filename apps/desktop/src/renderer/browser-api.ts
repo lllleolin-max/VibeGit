@@ -33,6 +33,7 @@ if (!browserWindow.vibegit) {
     selectProjectDirectory: () => invoke('selectProjectDirectory'),
     listProjects: () => invoke('listProjects'),
     addProject: (input) => invoke('addProject', [input]),
+    removeProject: (projectId) => invoke('removeProject', [projectId]),
     refreshProject: (projectId) => invoke('refreshProject', [projectId]),
     initializeProtection: (projectId) => invoke('initializeProtection', [projectId]),
     listCheckpoints: (projectId) => invoke('listCheckpoints', [projectId]),

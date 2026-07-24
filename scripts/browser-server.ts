@@ -48,6 +48,7 @@ const actions: Record<keyof VibeGitApi, (args: unknown[]) => unknown | Promise<u
   },
   listProjects: () => service.listProjects(),
   addProject: (args) => service.addProject(argument<AddProjectInput>(args, 0)),
+  removeProject: (args) => service.removeProject(argument<string>(args, 0)),
   refreshProject: (args) => service.refreshProject(argument<string>(args, 0)),
   initializeProtection: (args) => service.initializeProtection(argument<string>(args, 0)),
   listCheckpoints: (args) => service.listCheckpoints(argument<string>(args, 0)),
