@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TestSandbox } from '../helpers'
 import { cleanupSandbox, createSandbox, writeProjectFile } from '../helpers'
-import { parseAgentEvent } from '@vibegit/shared'
+import { parseAgentEvent, parseRecordAgentSummary } from '@vibegit/shared'
 import { adaptHookEvent } from '@vibegit/agent-events'
 import { VibeGitService } from '@vibegit/core'
 
@@ -44,6 +44,32 @@ describe('Agent events', () => {
   it('validates stdin event shape', () => {
     expect(() => parseAgentEvent({ event: 'wrong' })).toThrow(/event 必须/)
     expect(parseAgentEvent({ event: 'task-start', agent: 'claude-code', projectPath: 'C:/demo', timestamp: '2026-07-11T08:00:00Z' })).toMatchObject({ agent: 'claude-code' })
+  })
+
+  it('attaches the queued plain-language summary to the matching Agent checkpoint', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    await sandbox.service.initializeProtection(project.id)
+    await sandbox.service.handleAgentEvent({
+      event: 'task-start', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'summary-session', timestamp: new Date().toISOString()
+    })
+    await sandbox.service.recordAgentSummary(parseRecordAgentSummary({
+      projectPath: sandbox.projectPath,
+      agent: 'codex',
+      sessionId: 'summary-session',
+      summary: { overview: '用户现在可以使用邮箱验证码登录。', added: ['邮箱验证码登录'], improved: ['登录失败提示'], removed: [] }
+    }))
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 2\n')
+    const result = await sandbox.service.handleAgentEvent({
+      event: 'task-end', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'summary-session', timestamp: new Date().toISOString()
+    })
+    expect(result.checkpoint?.summary).toBe('用户现在可以使用邮箱验证码登录。')
+    expect(result.checkpoint?.metadata).toMatchObject({
+      featureSummary: { added: ['邮箱验证码登录'], improved: ['登录失败提示'], removed: [] }
+    })
   })
 
   it('adapts Hook JSON, redacts prompt secrets, and deduplicates retries', async () => {

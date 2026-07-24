@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { realpath } from 'node:fs/promises'
-import { isAbsolute, relative, resolve } from 'node:path'
-import type { AgentEvent, AgentEventRecord, Checkpoint } from '@vibegit/shared'
+import { mkdir, readdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
+import { isAbsolute, join, relative, resolve } from 'node:path'
+import type { AgentEvent, AgentEventRecord, Checkpoint, FeatureChangeSummary, RecordAgentSummaryInput } from '@vibegit/shared'
 import { redactSecrets, VibeGitError } from '@vibegit/shared'
 import { VibeGitDatabase } from '@vibegit/database'
 import { CheckpointEngine } from '@vibegit/checkpoint-engine'
@@ -10,6 +10,24 @@ export interface AgentEventResult {
   event: AgentEventRecord
   checkpoint?: Checkpoint
   changed: boolean
+}
+
+interface StoredAgentSummary {
+  projectPath: string
+  agent: RecordAgentSummaryInput['agent']
+  sessionId?: string
+  summary: FeatureChangeSummary
+  createdAt: string
+}
+
+function summaryLabel(summary: FeatureChangeSummary): string {
+  if (summary.overview) return summary.overview
+  const parts = [
+    summary.added.length ? `新增 ${summary.added.length} 项` : '',
+    summary.improved.length ? `改进 ${summary.improved.length} 项` : '',
+    summary.removed.length ? `移除 ${summary.removed.length} 项` : ''
+  ].filter(Boolean)
+  return parts.join('、')
 }
 
 export function adaptHookEvent(input: unknown, agent: AgentEvent['agent']): AgentEvent | undefined {
@@ -50,8 +68,51 @@ function pathContains(root: string, candidate: string): boolean {
 export class AgentEventService {
   constructor(
     readonly database: VibeGitDatabase,
-    readonly checkpoints: CheckpointEngine
+    readonly checkpoints: CheckpointEngine,
+    readonly dataDirectory: string
   ) {}
+
+  private summaryDirectory(): string {
+    return join(this.dataDirectory, 'agent-change-summaries')
+  }
+
+  async recordSummary(input: RecordAgentSummaryInput): Promise<void> {
+    const projectPath = await realpath(resolve(input.projectPath))
+    const project = this.database.listProjects()
+      .filter((candidate) => pathContains(candidate.path, projectPath))
+      .sort((left, right) => right.path.length - left.path.length)[0]
+    if (!project || !project.protectionEnabled) {
+      throw new VibeGitError('PROJECT_NOT_REGISTERED', 'Register this project and enable VibeGit protection before recording a change summary')
+    }
+    const record: StoredAgentSummary = {
+      projectPath: project.path,
+      agent: input.agent,
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+      summary: input.summary,
+      createdAt: new Date().toISOString()
+    }
+    await mkdir(this.summaryDirectory(), { recursive: true })
+    await writeFile(join(this.summaryDirectory(), `${randomUUID()}.json`), JSON.stringify(record), 'utf8')
+  }
+
+  private async consumeSummary(projectPath: string, agent: RecordAgentSummaryInput['agent'], sessionId?: string): Promise<FeatureChangeSummary | undefined> {
+    let candidates: Array<{ path: string; record: StoredAgentSummary }> = []
+    try {
+      const files = await readdir(this.summaryDirectory())
+      candidates = (await Promise.all(files.filter((file) => file.endsWith('.json')).map(async (file) => {
+        try {
+          const record = JSON.parse(await readFile(join(this.summaryDirectory(), file), 'utf8')) as StoredAgentSummary
+          return record.projectPath === projectPath && record.agent === agent && (!sessionId || !record.sessionId || record.sessionId === sessionId)
+            ? { path: join(this.summaryDirectory(), file), record }
+            : undefined
+        } catch { return undefined }
+      }))).filter((entry): entry is { path: string; record: StoredAgentSummary } => Boolean(entry))
+    } catch { return undefined }
+    const selected = candidates.sort((left, right) => right.record.createdAt.localeCompare(left.record.createdAt))[0]
+    if (!selected) return undefined
+    try { await unlink(selected.path) } catch { /* The checkpoint can still use the summary once. */ }
+    return selected.record.summary
+  }
 
   async handle(input: AgentEvent): Promise<AgentEventResult> {
     let projectPath: string
@@ -140,6 +201,7 @@ export class AgentEventService {
 
       const started = this.database.getLatestAgentStart(project.id, input.agent, input.sessionId)
       const resolvedTaskText = taskText ?? started?.taskText
+      const featureSummary = await this.consumeSummary(project.path, input.agent, input.sessionId)
       const checkpoint = await this.checkpoints.create({
         projectId: project.id,
         type: 'post_agent',
@@ -147,7 +209,7 @@ export class AgentEventService {
         agent: input.agent,
         ...(input.sessionId ? { agentSessionId: input.sessionId } : {}),
         ...(resolvedTaskText ? { taskText: resolvedTaskText } : {}),
-        summary: input.success === false
+        summary: featureSummary ? summaryLabel(featureSummary) : input.success === false
           ? '任务未成功结束，已保存检测到的当前修改'
           : input.success === true
             ? 'Agent 任务完成后自动保存'
@@ -157,6 +219,7 @@ export class AgentEventService {
           source: 'agent-event',
           eventTimestamp: input.timestamp,
           ...(input.success !== undefined ? { success: input.success } : {}),
+          ...(featureSummary ? { featureSummary } : {}),
           ...(started ? { startEventId: started.id, preAgentCheckpointId: started.checkpointId } : {})
         }
       })

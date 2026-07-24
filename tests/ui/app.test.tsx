@@ -150,6 +150,17 @@ describe('VibeGit UI flow', () => {
     expect(await screen.findByText('Environment setup')).toBeInTheDocument()
   })
 
+  it('translates the timeline labels and dynamic counts after changing language', async () => {
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), listCheckpoints: vi.fn(() => success([checkpoint])) })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.selectOptions(await screen.findByLabelText('显示语言'), 'en')
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(await screen.findByText('Project timeline')).toBeInTheDocument()
+    expect(await screen.findByText('1 checkpoints')).toBeInTheDocument()
+  })
+
   it('applies a saved language when the app starts', () => {
     window.localStorage.setItem('vibegit.display-language', 'ar')
     render(<App />)
@@ -229,6 +240,7 @@ describe('VibeGit UI flow', () => {
   })
 
   it('opens a real checkpoint diff and completes the confirmed restore/undo flow', async () => {
+    window.localStorage.setItem('vibegit.change-presentation', 'code')
     const api = mockApi({
       listProjects: vi.fn(() => success([project])),
       listCheckpoints: vi.fn(() => success([checkpoint]))
@@ -251,6 +263,28 @@ describe('VibeGit UI flow', () => {
     expect(await screen.findByText('已撤销本次回退，文件恢复到回退前状态')).toBeInTheDocument()
     await waitFor(() => expect(api.executeRestore).toHaveBeenCalledWith('restore-token'))
     expect(api.undoRestore).toHaveBeenCalledWith('restore-1')
+  })
+
+  it('shows a plain-language feature summary by default and lets users switch to code changes', async () => {
+    const summaryCheckpoint: Checkpoint = {
+      ...checkpoint,
+      metadata: { featureSummary: { overview: '用户现在可以用邮箱验证码登录。', added: ['邮箱验证码登录'], improved: ['登录失败提示'], removed: ['旧的临时登录入口'] } }
+    }
+    window.vibegit = mockApi({
+      listProjects: vi.fn(() => success([project])),
+      listCheckpoints: vi.fn(() => success([summaryCheckpoint]))
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: /邮箱验证码登录/ }))
+    expect((await screen.findAllByText('用户现在可以用邮箱验证码登录。')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('+added')).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.click(await screen.findByRole('radio', { name: /代码变更/ }))
+    expect(window.localStorage.getItem('vibegit.change-presentation')).toBe('code')
+    expect(await screen.findByText('+added')).toBeInTheDocument()
   })
 
   it('renders a safe error state instead of failing silently', async () => {

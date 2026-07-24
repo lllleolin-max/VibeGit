@@ -153,6 +153,20 @@ export interface AgentEvent {
   testStatus?: TestStatus
 }
 
+export interface FeatureChangeSummary {
+  overview?: string
+  added: string[]
+  improved: string[]
+  removed: string[]
+}
+
+export interface RecordAgentSummaryInput {
+  projectPath: string
+  agent: Exclude<AgentType, 'manual' | 'system' | 'unknown'>
+  sessionId?: string
+  summary: FeatureChangeSummary
+}
+
 export interface AgentEventRecord {
   id: string
   projectId: string
@@ -429,6 +443,45 @@ export interface VibeGitApi {
   selectDataDirectory(): Promise<ApiResult<string | null>>
   setDataDirectory(path: string): Promise<ApiResult<DataDirectoryUpdateResult>>
   checkEnvironment(): Promise<ApiResult<EnvironmentCheckResult>>
+}
+
+function parseSummaryItems(value: unknown, field: string): string[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value) || value.length > 12 || value.some((item) => typeof item !== 'string' || item.trim().length === 0 || item.length > 280)) {
+    throw new VibeGitError('INVALID_CHANGE_SUMMARY', `${field} must be a list of up to 12 short text items`)
+  }
+  return value.map((item) => (item as string).trim())
+}
+
+export function parseRecordAgentSummary(input: unknown): RecordAgentSummaryInput {
+  if (!input || typeof input !== 'object') throw new VibeGitError('INVALID_CHANGE_SUMMARY', 'Change summary must be a JSON object')
+  const record = input as Record<string, unknown>
+  if (typeof record.projectPath !== 'string' || record.projectPath.trim().length === 0 || record.projectPath.length > 10_000) {
+    throw new VibeGitError('INVALID_CHANGE_SUMMARY', 'projectPath is required')
+  }
+  if (record.agent !== 'codex' && record.agent !== 'claude-code') {
+    throw new VibeGitError('INVALID_CHANGE_SUMMARY', 'agent must be codex or claude-code')
+  }
+  if (!record.summary || typeof record.summary !== 'object') throw new VibeGitError('INVALID_CHANGE_SUMMARY', 'summary is required')
+  const summary = record.summary as Record<string, unknown>
+  const overview = typeof summary.overview === 'string' && summary.overview.trim()
+    ? summary.overview.trim().slice(0, 500)
+    : undefined
+  const parsed = {
+    ...(overview ? { overview } : {}),
+    added: parseSummaryItems(summary.added, 'summary.added'),
+    improved: parseSummaryItems(summary.improved, 'summary.improved'),
+    removed: parseSummaryItems(summary.removed, 'summary.removed')
+  }
+  if (!parsed.overview && parsed.added.length + parsed.improved.length + parsed.removed.length === 0) {
+    throw new VibeGitError('INVALID_CHANGE_SUMMARY', 'summary must contain an overview or at least one change')
+  }
+  return {
+    projectPath: record.projectPath.trim(),
+    agent: record.agent,
+    ...(typeof record.sessionId === 'string' && record.sessionId.trim() ? { sessionId: record.sessionId.trim().slice(0, 500) } : {}),
+    summary: parsed
+  }
 }
 
 export function parseAgentEvent(input: unknown): AgentEvent {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { stdin, stdout, stderr } from 'node:process'
 import { VibeGitService } from '@vibegit/core'
-import { parseAgentEvent, toPublicError, VibeGitError, type ApiResult } from '@vibegit/shared'
+import { parseAgentEvent, parseRecordAgentSummary, toPublicError, VibeGitError, type ApiResult } from '@vibegit/shared'
 import { adaptHookEvent } from '@vibegit/agent-events'
 
 const MAX_STDIN_BYTES = 1024 * 1024
@@ -26,6 +26,7 @@ function help(): void {
   stdout.write(`VibeGit CLI\n\n`)
   stdout.write(`用法:\n`)
   stdout.write(`  vibegit event --stdin       从 JSON stdin 接收 task-start/task-end\n`)
+  stdout.write(`  vibegit summary --stdin     保存本轮给用户看的功能变更说明\n`)
   stdout.write(`  vibegit hook <agent> --stdin 适配 Codex/Claude Code Hook JSON\n`)
   stdout.write(`  vibegit projects            列出本地项目\n`)
   stdout.write(`  vibegit checkpoints <id>    列出项目保存点\n`)
@@ -46,6 +47,12 @@ async function main(): Promise<void> {
       const raw = await readStdin()
       const event = parseAgentEvent(JSON.parse(raw) as unknown)
       print({ ok: true, data: await service.handleAgentEvent(event) })
+      return
+    }
+    if (args[0] === 'summary' && args[1] === '--stdin' && args.length === 2) {
+      const raw = await readStdin()
+      await service.recordAgentSummary(parseRecordAgentSummary(JSON.parse(raw) as unknown))
+      print({ ok: true, data: true })
       return
     }
     if (hookMode) {

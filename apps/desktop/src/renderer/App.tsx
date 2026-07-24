@@ -45,6 +45,7 @@ import type {
   Checkpoint,
   CheckpointDiff,
   EnvironmentCheckResult,
+  FeatureChangeSummary,
   GitHubCliStatus,
   Project,
   PublicError,
@@ -64,6 +65,7 @@ type Modal =
   | null
 
 type DisplayLanguage = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'ru' | 'ar'
+type ChangePresentation = 'feature' | 'code'
 
 const DISPLAY_LANGUAGES: ReadonlyArray<{ value: DisplayLanguage; label: string; nativeLabel: string; direction: 'ltr' | 'rtl' }> = [
   { value: 'zh-CN', label: '简体中文', nativeLabel: '简体中文', direction: 'ltr' },
@@ -76,6 +78,9 @@ const DISPLAY_LANGUAGES: ReadonlyArray<{ value: DisplayLanguage; label: string; 
 ]
 
 const LANGUAGE_STORAGE_KEY = 'vibegit.display-language'
+const CHANGE_PRESENTATION_STORAGE_KEY = 'vibegit.change-presentation'
+const ORIGINAL_TEXT_BY_NODE = new WeakMap<Text, string>()
+const RENDERED_TEXT_BY_NODE = new WeakMap<Text, string>()
 
 type TranslationSet = Partial<Record<DisplayLanguage, string>>
 
@@ -108,7 +113,63 @@ const UI_TRANSLATIONS: Record<string, TranslationSet> = {
   '保存': { 'zh-TW': '儲存', en: 'Save', ja: '保存', ko: '저장', ru: 'Сохранить', ar: 'حفظ' },
   '已检测': { 'zh-TW': '已檢測', en: 'Detected', ja: '検出済み', ko: '감지됨', ru: 'Обнаружено', ar: 'تم الكشف' },
   '未找到': { 'zh-TW': '未找到', en: 'Not found', ja: '見つかりません', ko: '찾을 수 없음', ru: 'Не найдено', ar: 'غير موجود' },
-  '尚未检测': { 'zh-TW': '尚未檢測', en: 'Not checked yet', ja: '未確認', ko: '아직 확인되지 않음', ru: 'Еще не проверено', ar: 'لم يتم الفحص بعد' }
+  '尚未检测': { 'zh-TW': '尚未檢測', en: 'Not checked yet', ja: '未確認', ko: '아직 확인되지 않음', ru: 'Еще не проверено', ar: 'لم يتم الفحص بعد' },
+  '项目时间线': { 'zh-TW': '專案時間線', en: 'Project timeline', ja: 'プロジェクトのタイムライン', ko: '프로젝트 타임라인', ru: 'Хронология проекта', ar: 'المخطط الزمني للمشروع' },
+  '你的安全保存记录': { 'zh-TW': '你的安全儲存記錄', en: 'Your safe save history', ja: '安全な保存履歴', ko: '안전한 저장 기록', ru: 'История безопасных сохранений', ar: 'سجل الحفظ الآمن' },
+  ' 个保存点': { 'zh-TW': ' 個儲存點', en: ' checkpoints', ja: ' 個の保存ポイント', ko: '개의 저장 지점', ru: ' точек сохранения', ar: ' نقاط حفظ' },
+  '初始化项目': { 'zh-TW': '初始化專案', en: 'Initialize project', ja: 'プロジェクトを初期化', ko: '프로젝트 초기화', ru: 'Инициализировать проект', ar: 'تهيئة المشروع' },
+  '初始保护': { 'zh-TW': '初始保護', en: 'Initial protection', ja: '初期保護', ko: '초기 보호', ru: 'Начальная защита', ar: 'الحماية الأولية' },
+  '未关联测试': { 'zh-TW': '未關聯測試', en: 'No linked tests', ja: '関連テストなし', ko: '연결된 테스트 없음', ru: 'Нет связанных тестов', ar: 'لا توجد اختبارات مرتبطة' },
+  '仅保存在本机': { 'zh-TW': '僅儲存在本機', en: 'Stored locally only', ja: 'ローカル保存のみ', ko: '로컬에만 저장됨', ru: 'Сохранено только локально', ar: 'محفوظ محليًا فقط' },
+  '查看这次改了什么': { 'zh-TW': '查看這次改了什麼', en: 'See what changed', ja: '今回の変更を見る', ko: '이번 변경 보기', ru: 'Посмотреть изменения', ar: 'عرض ما تغيّر' },
+  '查看功能变化': { 'zh-TW': '查看功能變化', en: 'View feature changes', ja: '機能の変更を見る', ko: '기능 변경 보기', ru: 'Посмотреть изменения функций', ar: 'عرض تغييرات الميزات' },
+  '查看代码变更': { 'zh-TW': '查看程式碼變更', en: 'View code changes', ja: 'コード変更を見る', ko: '코드 변경 보기', ru: 'Посмотреть изменения кода', ar: 'عرض تغييرات الكود' },
+  '保存点显示方式': { 'zh-TW': '儲存點顯示方式', en: 'Checkpoint display', ja: '保存ポイントの表示', ko: '저장 지점 표시', ru: 'Отображение точек сохранения', ar: 'عرض نقاط الحفظ' },
+  '为非程序员显示大白话的功能变化；也可随时切回完整代码差异。': { 'zh-TW': '為非程式設計師顯示白話的功能變化；也可隨時切回完整程式碼差異。', en: 'Show plain-language feature changes, or switch back to full code diffs at any time.', ja: '非プログラマー向けに機能の変更を分かりやすく表示し、いつでも完全なコード差分に切り替えられます。', ko: '비개발자에게 쉬운 기능 변경을 보여 주며 언제든 전체 코드 차이로 전환할 수 있습니다.', ru: 'Показывайте понятные изменения функций или в любой момент вернитесь к полным различиям кода.', ar: 'اعرض تغييرات الميزات بلغة بسيطة، أو عد إلى فروق الكود الكاملة في أي وقت.' },
+  '功能变化': { 'zh-TW': '功能變化', en: 'Feature changes', ja: '機能の変更', ko: '기능 변경', ru: 'Изменения функций', ar: 'تغييرات الميزات' },
+  '新增、改进和删除了哪些功能': { 'zh-TW': '新增、改進和刪除了哪些功能', en: 'Features added, improved, and removed', ja: '追加・改善・削除された機能', ko: '추가·개선·삭제된 기능', ru: 'Добавленные, улучшенные и удаленные функции', ar: 'الميزات المضافة والمحسّنة والمحذوفة' },
+  '代码变更': { 'zh-TW': '程式碼變更', en: 'Code changes', ja: 'コード変更', ko: '코드 변경', ru: 'Изменения кода', ar: 'تغييرات الكود' },
+  '文件列表与逐行代码差异': { 'zh-TW': '檔案清單與逐行程式碼差異', en: 'File list and line-by-line code diff', ja: 'ファイル一覧と行ごとのコード差分', ko: '파일 목록과 줄 단위 코드 차이', ru: 'Список файлов и построчные различия кода', ar: 'قائمة الملفات وفروق الكود سطرًا بسطر' },
+  '这次的功能变化': { 'zh-TW': '這次的功能變化', en: 'Feature changes in this save', ja: '今回の機能変更', ko: '이번 저장의 기능 변경', ru: 'Изменения функций в этом сохранении', ar: 'تغييرات الميزات في هذا الحفظ' },
+  '新增了什么': { 'zh-TW': '新增了什麼', en: 'What was added', ja: '追加されたこと', ko: '새로 추가된 내용', ru: 'Что добавлено', ar: 'ما تمت إضافته' },
+  '改进了什么': { 'zh-TW': '改進了什麼', en: 'What was improved', ja: '改善されたこと', ko: '개선된 내용', ru: 'Что улучшено', ar: 'ما تم تحسينه' },
+  '删除了什么': { 'zh-TW': '刪除了什麼', en: 'What was removed', ja: '削除されたこと', ko: '삭제된 내용', ru: 'Что удалено', ar: 'ما تمت إزالته' },
+  '这次还没有功能说明': { 'zh-TW': '這次還沒有功能說明', en: 'There is no feature summary for this save yet', ja: 'この保存にはまだ機能の説明がありません', ko: '이 저장에는 아직 기능 설명이 없습니다', ru: 'Для этого сохранения пока нет описания функций', ar: 'لا يوجد ملخص للميزات لهذا الحفظ بعد' },
+  '让 Codex 或 Claude Code 在完成任务后使用 VibeGit 的改动说明技能；下一次保存点会显示大白话总结。': { 'zh-TW': '讓 Codex 或 Claude Code 在完成任務後使用 VibeGit 的改動說明技能；下一個儲存點會顯示白話總結。', en: 'Have Codex or Claude Code use VibeGit’s change-summary skill after the task; the next checkpoint will show a plain-language summary.', ja: 'タスク完了後に Codex または Claude Code に VibeGit の変更要約スキルを使わせてください。次の保存ポイントに分かりやすい要約が表示されます。', ko: '작업 후 Codex 또는 Claude Code가 VibeGit 변경 요약 스킬을 사용하면 다음 저장 지점에 쉬운 요약이 표시됩니다.', ru: 'Попросите Codex или Claude Code использовать навык VibeGit для сводки изменений после задачи; в следующей точке сохранения появится понятное резюме.', ar: 'اجعل Codex أو Claude Code يستخدم مهارة تلخيص تغييرات VibeGit بعد المهمة؛ وستظهر خلاصة مبسطة في نقطة الحفظ التالية.' }
+  , '保护中': { 'zh-TW': '保護中', en: 'Protected', ja: '保護中', ko: '보호 중', ru: 'Защищено', ar: 'محمي' }
+  , '尚未保护': { 'zh-TW': '尚未保護', en: 'Not protected', ja: '未保護', ko: '보호되지 않음', ru: 'Не защищено', ar: 'غير محمي' }
+  , '创建保存点': { 'zh-TW': '建立儲存點', en: 'Create checkpoint', ja: '保存ポイントを作成', ko: '저장 지점 만들기', ru: 'Создать точку сохранения', ar: 'إنشاء نقطة حفظ' }
+  , '暂时收起': { 'zh-TW': '暫時收起', en: 'Stash changes', ja: '変更を一時退避', ko: '변경 사항 임시 보관', ru: 'Временно скрыть изменения', ar: 'إخفاء التغييرات مؤقتًا' }
+  , '有新的修改': { 'zh-TW': '有新的修改', en: 'New changes found', ja: '新しい変更があります', ko: '새 변경 사항이 있습니다', ru: 'Есть новые изменения', ar: 'توجد تغييرات جديدة' }
+  , '当前版本已保存': { 'zh-TW': '目前版本已儲存', en: 'Current version saved', ja: '現在のバージョンは保存済み', ko: '현재 버전이 저장됨', ru: 'Текущая версия сохранена', ar: 'تم حفظ الإصدار الحالي' }
+  , '已安全备份': { 'zh-TW': '已安全備份', en: 'Safely backed up', ja: '安全にバックアップ済み', ko: '안전하게 백업됨', ru: 'Безопасно сохранено в резервной копии', ar: 'تم النسخ الاحتياطي بأمان' }
+  , '等待备份': { 'zh-TW': '等待備份', en: 'Waiting to back up', ja: 'バックアップ待ち', ko: '백업 대기 중', ru: 'Ожидает резервного копирования', ar: 'بانتظار النسخ الاحتياطي' }
+  , '尚未设置备份': { 'zh-TW': '尚未設定備份', en: 'Backup not set up', ja: 'バックアップ未設定', ko: '백업이 설정되지 않음', ru: 'Резервное копирование не настроено', ar: 'لم يتم إعداد النسخ الاحتياطي' }
+  , '任务完成，但没有检测到文件变化': { 'zh-TW': '任務完成，但沒有偵測到檔案變化', en: 'Task completed, but no file changes were found', ja: 'タスクは完了しましたが、ファイルの変更は見つかりませんでした', ko: '작업이 완료되었지만 파일 변경을 찾지 못했습니다', ru: 'Задача завершена, но изменения файлов не обнаружены', ar: 'اكتملت المهمة، ولكن لم يتم العثور على تغييرات في الملفات' }
+  , '测试通过': { 'zh-TW': '測試通過', en: 'Tests passed', ja: 'テスト成功', ko: '테스트 통과', ru: 'Тесты пройдены', ar: 'نجحت الاختبارات' }
+  , '测试未通过': { 'zh-TW': '測試未通過', en: 'Tests failed', ja: 'テスト失敗', ko: '테스트 실패', ru: 'Тесты не пройдены', ar: 'فشلت الاختبارات' }
+  , '已备份': { 'zh-TW': '已備份', en: 'Backed up', ja: 'バックアップ済み', ko: '백업됨', ru: 'Сохранено в резервной копии', ar: 'تم النسخ الاحتياطي' }
+  , '回到这个版本': { 'zh-TW': '回到這個版本', en: 'Restore this version', ja: 'このバージョンに戻す', ko: '이 버전으로 복원', ru: 'Восстановить эту версию', ar: 'استعادة هذا الإصدار' }
+  , '当时交给 Agent 的任务': { 'zh-TW': '當時交給 Agent 的任務', en: 'Task given to the Agent', ja: 'Agent に渡したタスク', ko: 'Agent에게 전달한 작업', ru: 'Задача, поставленная Agent', ar: 'المهمة المعطاة للوكيل' }
+  , '正在整理这次修改…': { 'zh-TW': '正在整理這次修改…', en: 'Preparing these changes…', ja: 'この変更を整理中…', ko: '이번 변경을 정리하는 중…', ru: 'Подготавливаем эти изменения…', ar: 'جارٍ إعداد هذه التغييرات…' }
+  , '这个保存点没有文件内容变化': { 'zh-TW': '這個儲存點沒有檔案內容變化', en: 'This checkpoint has no file content changes', ja: 'この保存ポイントにはファイル内容の変更がありません', ko: '이 저장 지점에는 파일 내용 변경이 없습니다', ru: 'В этой точке сохранения нет изменений содержимого файлов', ar: 'لا توجد تغييرات في محتوى الملفات في نقطة الحفظ هذه' }
+  , '它用于记录一个安全边界。': { 'zh-TW': '它用於記錄一個安全邊界。', en: 'It records a safe boundary.', ja: '安全な境界を記録するためのものです。', ko: '안전한 경계를 기록하는 데 사용됩니다.', ru: 'Она фиксирует безопасную границу.', ar: 'تسجل حدًا آمنًا.' }
+  , '修改的文件': { 'zh-TW': '修改的檔案', en: 'Changed files', ja: '変更されたファイル', ko: '변경된 파일', ru: 'Измененные файлы', ar: 'الملفات التي تم تغييرها' }
+  , '新增': { 'zh-TW': '新增', en: 'Added', ja: '追加', ko: '추가됨', ru: 'Добавлено', ar: 'تمت الإضافة' }
+  , '删除': { 'zh-TW': '刪除', en: 'Deleted', ja: '削除', ko: '삭제됨', ru: 'Удалено', ar: 'تم الحذف' }
+  , '改名': { 'zh-TW': '改名', en: 'Renamed', ja: '名前変更', ko: '이름 변경됨', ru: 'Переименовано', ar: 'تمت إعادة التسمية' }
+  , '修改': { 'zh-TW': '修改', en: 'Modified', ja: '変更', ko: '수정됨', ru: 'Изменено', ar: 'تم التعديل' }
+  , '保护引擎状态': { 'zh-TW': '保護引擎狀態', en: 'Protection engine status', ja: '保護エンジンの状態', ko: '보호 엔진 상태', ru: 'Состояние движка защиты', ar: 'حالة محرك الحماية' }
+  , '这些信息用于确认 VibeGit 能否自动保存每轮 Agent 修改。': { 'zh-TW': '這些資訊用於確認 VibeGit 能否自動儲存每輪 Agent 修改。', en: 'These details confirm whether VibeGit can automatically save each Agent change.', ja: 'これらの情報で、VibeGit が Agent の各変更を自動保存できるか確認します。', ko: '이 정보는 VibeGit이 각 Agent 변경을 자동 저장할 수 있는지 확인합니다.', ru: 'Эти сведения подтверждают, может ли VibeGit автоматически сохранять каждое изменение Agent.', ar: 'تؤكد هذه التفاصيل ما إذا كان VibeGit يستطيع حفظ كل تغيير يجريه الوكيل تلقائيًا.' }
+  , '只存保存点说明和操作记录，源码仍在项目中。': { 'zh-TW': '只存儲存點說明和操作記錄，原始碼仍在專案中。', en: 'Only checkpoint details and activity records are stored; your source code stays in the project.', ja: '保存ポイントの説明と操作記録だけを保存し、ソースコードはプロジェクトに残ります。', ko: '저장 지점 설명과 작업 기록만 저장되며 소스 코드는 프로젝트에 남아 있습니다.', ru: 'Хранятся только сведения о точках сохранения и журнал действий; исходный код остается в проекте.', ar: 'يتم حفظ تفاصيل نقاط الحفظ وسجل النشاط فقط؛ ويبقى الكود المصدري في المشروع.' }
+  , '状态': { 'zh-TW': '狀態', en: 'Status', ja: '状態', ko: '상태', ru: 'Состояние', ar: 'الحالة' }
+  , '记录位置': { 'zh-TW': '記錄位置', en: 'Record location', ja: '記録の場所', ko: '기록 위치', ru: 'Расположение записей', ar: 'موقع السجلات' }
+  , '命令超时': { 'zh-TW': '命令逾時', en: 'Command timeout', ja: 'コマンドのタイムアウト', ko: '명령 시간 초과', ru: 'Тайм-аут команды', ar: 'مهلة الأمر' }
+  , '通过统一事件 CLI 在修改前后创建保护点。': { 'zh-TW': '透過統一事件 CLI 在修改前後建立保護點。', en: 'Use the shared event CLI to create protection points before and after changes.', ja: '共通イベント CLI で変更前後に保護ポイントを作成します。', ko: '공통 이벤트 CLI로 변경 전후에 보호 지점을 만듭니다.', ru: 'Используйте единый CLI событий для создания точек защиты до и после изменений.', ar: 'استخدم واجهة سطر الأوامر الموحدة للأحداث لإنشاء نقاط حماية قبل التغييرات وبعدها.' }
+  , '这些规则始终生效，不能被普通操作绕过。': { 'zh-TW': '這些規則始終生效，不能被一般操作繞過。', en: 'These rules are always active and cannot be bypassed through normal actions.', ja: 'これらのルールは常に有効で、通常の操作では回避できません。', ko: '이 규칙은 항상 적용되며 일반 작업으로 우회할 수 없습니다.', ru: 'Эти правила всегда действуют и не могут быть обойдены обычными действиями.', ar: 'هذه القواعد مفعلة دائمًا ولا يمكن تجاوزها بالإجراءات العادية.' }
+  , '默认使用简体中文。选择会自动保存；阿拉伯语将采用从右到左的阅读方向。': { 'zh-TW': '預設使用簡體中文。選擇會自動儲存；阿拉伯語將採用由右至左的閱讀方向。', en: 'Simplified Chinese is the default. Your choice saves automatically; Arabic uses right-to-left reading direction.', ja: '既定は簡体中国語です。選択は自動保存され、アラビア語は右から左の方向で表示されます。', ko: '기본 언어는 중국어 간체이며 선택은 자동 저장됩니다. 아랍어는 오른쪽에서 왼쪽 방향을 사용합니다.', ru: 'По умолчанию используется упрощенный китайский. Выбор сохраняется автоматически; для арабского используется направление справа налево.', ar: 'الصينية المبسطة هي الإعداد الافتراضي. يتم حفظ اختيارك تلقائيًا؛ وتستخدم العربية اتجاه القراءة من اليمين إلى اليسار.' }
+  , '选择保存保护记录、诊断日志和 VibeGit 专用 SSH 数据的本地文件夹。': { 'zh-TW': '選擇儲存保護記錄、診斷日誌和 VibeGit 專用 SSH 資料的本機資料夾。', en: 'Choose the local folder for protection records, diagnostic logs, and VibeGit SSH data.', ja: '保護記録、診断ログ、VibeGit 専用 SSH データを保存するローカルフォルダーを選びます。', ko: '보호 기록, 진단 로그 및 VibeGit 전용 SSH 데이터를 저장할 로컬 폴더를 선택합니다.', ru: 'Выберите локальную папку для записей защиты, диагностических журналов и данных SSH VibeGit.', ar: 'اختر المجلد المحلي لسجلات الحماية وسجلات التشخيص وبيانات SSH الخاصة بـ VibeGit.' }
+  , '扫描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。': { 'zh-TW': '掃描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 時會透過 Windows 套件管理員自動安裝。', en: 'Check GitHub CLI, Codex, and Claude Code. If GitHub CLI is missing, Windows Package Manager installs it automatically.', ja: 'GitHub CLI、Codex、Claude Code を確認します。GitHub CLI がない場合は Windows パッケージ マネージャーで自動インストールします。', ko: 'GitHub CLI, Codex 및 Claude Code를 확인합니다. GitHub CLI가 없으면 Windows 패키지 관리자가 자동 설치합니다.', ru: 'Проверьте GitHub CLI, Codex и Claude Code. Если GitHub CLI отсутствует, диспетчер пакетов Windows установит его автоматически.', ar: 'تحقق من GitHub CLI وCodex وClaude Code. إذا لم يكن GitHub CLI موجودًا، فسيقوم مدير حزم Windows بتثبيته تلقائيًا.' }
 }
 
 function translateVisibleUi(language: DisplayLanguage): void {
@@ -117,10 +178,19 @@ function translateVisibleUi(language: DisplayLanguage): void {
   const nodes: Text[] = []
   while (walker.nextNode()) nodes.push(walker.currentNode as Text)
   for (const node of nodes) {
-    const original = Object.entries(UI_TRANSLATIONS).find(([, values]) => Object.values(values).includes(node.data))?.[0] ?? node.data
+    if (!ORIGINAL_TEXT_BY_NODE.has(node) || RENDERED_TEXT_BY_NODE.get(node) !== node.data) ORIGINAL_TEXT_BY_NODE.set(node, node.data)
+    const original = ORIGINAL_TEXT_BY_NODE.get(node) ?? node.data
     const translated = language === 'zh-CN' ? original : UI_TRANSLATIONS[original]?.[language]
-    const nextValue = translated ?? original
+    const checkpointCount = original.match(/^(\d+) 个保存点$/)
+    const fileCount = original.match(/^(\d+) 个文件$/)
+    const dynamicTranslation: Partial<Record<DisplayLanguage, string>> = checkpointCount ? {
+      'zh-TW': `${checkpointCount[1]} 個儲存點`, en: `${checkpointCount[1]} checkpoints`, ja: `${checkpointCount[1]} 個の保存ポイント`, ko: `${checkpointCount[1]}개의 저장 지점`, ru: `${checkpointCount[1]} точек сохранения`, ar: `${checkpointCount[1]} نقاط حفظ`
+    } : fileCount ? {
+      'zh-TW': `${fileCount[1]} 個檔案`, en: `${fileCount[1]} files`, ja: `${fileCount[1]} 個のファイル`, ko: `${fileCount[1]}개 파일`, ru: `${fileCount[1]} файлов`, ar: `${fileCount[1]} ملفات`
+    } : {}
+    const nextValue = translated ?? dynamicTranslation[language] ?? original
     if (node.data !== nextValue) node.data = nextValue
+    RENDERED_TEXT_BY_NODE.set(node, nextValue)
   }
 }
 
@@ -131,6 +201,10 @@ function isDisplayLanguage(value: string | null): value is DisplayLanguage {
 function savedDisplayLanguage(): DisplayLanguage {
   const saved = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
   return isDisplayLanguage(saved) ? saved : 'zh-CN'
+}
+
+function savedChangePresentation(): ChangePresentation {
+  return window.localStorage.getItem(CHANGE_PRESENTATION_STORAGE_KEY) === 'code' ? 'code' : 'feature'
 }
 
 function applyDisplayLanguage(displayLanguage: DisplayLanguage): void {
@@ -187,6 +261,20 @@ function agentLabel(agent: Checkpoint['agent']): string {
   return ({ codex: 'Codex', 'claude-code': 'Claude Code', manual: '你', system: 'VibeGit', unknown: '未知' })[agent]
 }
 
+function featureSummaryOf(checkpoint: Checkpoint): FeatureChangeSummary | undefined {
+  const value = checkpoint.metadata.featureSummary
+  if (!value || typeof value !== 'object') return undefined
+  const summary = value as Partial<FeatureChangeSummary>
+  const validItems = (items: unknown): string[] => Array.isArray(items) && items.every((item) => typeof item === 'string') ? items : []
+  const result: FeatureChangeSummary = {
+    ...(typeof summary.overview === 'string' ? { overview: summary.overview } : {}),
+    added: validItems(summary.added),
+    improved: validItems(summary.improved),
+    removed: validItems(summary.removed)
+  }
+  return result.overview || result.added.length + result.improved.length + result.removed.length ? result : undefined
+}
+
 export function App(): ReactNode {
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedId, setSelectedId] = useState<string>()
@@ -203,6 +291,7 @@ export function App(): ReactNode {
   const [diffLoading, setDiffLoading] = useState(false)
   const [modal, setModal] = useState<Modal>(null)
   const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>(savedDisplayLanguage)
+  const [changePresentation, setChangePresentation] = useState<ChangePresentation>(savedChangePresentation)
 
   useEffect(() => {
     applyDisplayLanguage(displayLanguage)
@@ -216,6 +305,12 @@ export function App(): ReactNode {
     const onLanguageChange = (event: Event): void => setDisplayLanguage((event as CustomEvent<DisplayLanguage>).detail)
     window.addEventListener('vibegit:language-change', onLanguageChange)
     return () => window.removeEventListener('vibegit:language-change', onLanguageChange)
+  }, [])
+
+  useEffect(() => {
+    const onChangePresentation = (event: Event): void => setChangePresentation((event as CustomEvent<ChangePresentation>).detail)
+    window.addEventListener('vibegit:change-presentation', onChangePresentation)
+    return () => window.removeEventListener('vibegit:change-presentation', onChangePresentation)
   }, [])
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === selectedId), [projects, selectedId])
@@ -429,6 +524,7 @@ export function App(): ReactNode {
           <>
             <SettingsView onBack={() => setPage(selectedProject ? 'project' : 'projects')} />
             <LanguagePreferences />
+            <ChangePresentationPreferences />
             <DataDirectoryPreferences />
             <EnvironmentPreferences />
           </>
@@ -440,6 +536,7 @@ export function App(): ReactNode {
             checkpoints={checkpoints}
             agentEvents={agentEvents}
             failedRestores={failedRestores}
+            changePresentation={changePresentation}
             busy={busy}
             onInitialize={() => void initializeProtection()}
             onRefresh={() => void refreshProject()}
@@ -457,6 +554,7 @@ export function App(): ReactNode {
           diff={diff}
           loading={diffLoading}
           busy={busy}
+          changePresentation={changePresentation}
           onClose={() => { setSelectedCheckpoint(undefined); setDiff(undefined) }}
           onRestore={() => void prepareRestore(selectedCheckpoint)}
         />
@@ -610,6 +708,7 @@ function ProjectWorkspace(props: {
   checkpoints: Checkpoint[]
   agentEvents: AgentEventRecord[]
   failedRestores: RestoreRecord[]
+  changePresentation: ChangePresentation
   busy?: string | undefined
   onInitialize(): void
   onRefresh(): void
@@ -651,7 +750,7 @@ function ProjectWorkspace(props: {
             <div className="timeline-heading"><div><p className="eyebrow">项目时间线</p><h2>你的安全保存记录</h2></div><span>{props.checkpoints.length} 个保存点</span></div>
             {latestNoChange && <div className="agent-no-change" role="status"><CheckCircle2 size={17} /><div><strong>任务完成，但没有检测到文件变化</strong><small>{agentLabel(latestNoChange.agent)}{latestNoChange.taskText ? `：${latestNoChange.taskText}` : ' 本轮没有需要保存的新文件内容。'}</small></div></div>}
             {props.failedRestores.map((restore) => <div className="restore-recovery-alert" key={restore.id} role="alert"><AlertTriangle size={18} /><div><strong>有一次未完成的回退需要留意</strong><small>保险点仍在；如有已移动的文件，它们保存在恢复区，可随时打开查看。</small></div><button className="button ghost" onClick={() => void window.vibegit.openRecoveryDirectory(restore.id)}><FolderOpen size={15} />打开恢复区</button></div>)}
-            {props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} onOpen={props.onOpenCheckpoint} />}
+            {props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} changePresentation={props.changePresentation} onOpen={props.onOpenCheckpoint} />}
           </div>
         </>
       )}
@@ -659,7 +758,7 @@ function ProjectWorkspace(props: {
   )
 }
 
-function Timeline({ checkpoints, onOpen }: { checkpoints: Checkpoint[]; onOpen(checkpoint: Checkpoint): void }): ReactNode {
+function Timeline({ checkpoints, changePresentation, onOpen }: { checkpoints: Checkpoint[]; changePresentation: ChangePresentation; onOpen(checkpoint: Checkpoint): void }): ReactNode {
   return (
     <div className="timeline">
       {checkpoints.map((checkpoint, index) => {
@@ -670,8 +769,9 @@ function Timeline({ checkpoints, onOpen }: { checkpoints: Checkpoint[]; onOpen(c
             <div className="timeline-card">
               <div className="timeline-card-title"><div><h3>{checkpoint.title}</h3><span className={`pill ${type.tone}`}>{type.label}</span></div><MoreHorizontal size={18} /></div>
               {checkpoint.taskText && <p className="task-text">“{checkpoint.taskText}”</p>}
+              {changePresentation === 'feature' && featureSummaryOf(checkpoint)?.overview && <p className="feature-summary-preview">{featureSummaryOf(checkpoint)!.overview}</p>}
               <div className="timeline-meta"><span><Sparkles size={14} />{agentLabel(checkpoint.agent)}</span><span><Clock3 size={14} />{formatRelativeTime(checkpoint.createdAt)}</span><span><FileCode2 size={14} />{checkpoint.changedFiles.length} 个文件</span><span className="changes"><b>+{checkpoint.insertions}</b><em>−{checkpoint.deletions}</em></span></div>
-              <div className="timeline-footer"><span className={checkpoint.testStatus === 'passed' ? 'good' : 'muted'}>{checkpoint.testStatus === 'passed' ? '测试通过' : checkpoint.testStatus === 'failed' ? '测试未通过' : '未关联测试'}</span><span className={checkpoint.githubSyncStatus === 'synced' ? 'good' : 'muted'}>{checkpoint.githubSyncStatus === 'synced' ? '已备份' : '仅保存在本机'}</span><span className="link-copy">查看这次改了什么 <ChevronRight size={14} /></span></div>
+              <div className="timeline-footer"><span className={checkpoint.testStatus === 'passed' ? 'good' : 'muted'}>{checkpoint.testStatus === 'passed' ? '测试通过' : checkpoint.testStatus === 'failed' ? '测试未通过' : '未关联测试'}</span><span className={checkpoint.githubSyncStatus === 'synced' ? 'good' : 'muted'}>{checkpoint.githubSyncStatus === 'synced' ? '已备份' : '仅保存在本机'}</span><span className="link-copy">{changePresentation === 'feature' ? '查看功能变化' : '查看代码变更'} <ChevronRight size={14} /></span></div>
             </div>
           </button>
         )
@@ -684,7 +784,25 @@ function EmptyTimeline({ onSave }: { onSave(): void }): ReactNode {
   return <div className="empty-state"><History size={32} /><h3>时间线还很安静</h3><p>创建保存点后，你会在这里看到每轮修改和恢复记录。</p><button className="button secondary" onClick={onSave}><Save size={16} />创建第一个保存点</button></div>
 }
 
-function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff | undefined; loading: boolean; busy?: string | undefined; onClose(): void; onRestore(): void }): ReactNode {
+function FeatureChangeView({ checkpoint }: { checkpoint: Checkpoint }): ReactNode {
+  const summary = featureSummaryOf(checkpoint)
+  if (!summary) {
+    return <div className="feature-summary-empty"><Sparkles size={25} /><strong>这次还没有功能说明</strong><span>让 Codex 或 Claude Code 在完成任务后使用 VibeGit 的改动说明技能；下一次保存点会显示大白话总结。</span></div>
+  }
+  const sections: Array<{ label: string; items: string[]; tone: string }> = [
+    { label: '新增了什么', items: summary.added, tone: 'added' },
+    { label: '改进了什么', items: summary.improved, tone: 'improved' },
+    { label: '删除了什么', items: summary.removed, tone: 'removed' }
+  ]
+  return <div className="feature-change-view">
+    <div className="feature-summary-overview"><Sparkles size={18} /><div><strong>这次的功能变化</strong>{summary.overview && <p>{summary.overview}</p>}</div></div>
+    <div className="feature-change-sections">
+      {sections.filter((section) => section.items.length > 0).map((section) => <section className={`feature-change-section ${section.tone}`} key={section.label}><h3>{section.label}</h3><ul>{section.items.map((item) => <li key={item}>{item}</li>)}</ul></section>)}
+    </div>
+  </div>
+}
+
+function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff | undefined; loading: boolean; busy?: string | undefined; changePresentation: ChangePresentation; onClose(): void; onRestore(): void }): ReactNode {
   const [activeFile, setActiveFile] = useState<string>()
   const current = props.diff?.files.find((file) => file.path === activeFile) ?? props.diff?.files[0]
   const type = checkpointType(props.checkpoint.type)
@@ -694,7 +812,7 @@ function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff
         <header className="drawer-header"><button className="icon-button" aria-label="关闭详情" onClick={props.onClose}><X size={18} /></button><div><span className={`pill ${type.tone}`}>{type.label}</span><h2>{props.checkpoint.title}</h2><p>{new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(props.checkpoint.createdAt))} · {agentLabel(props.checkpoint.agent)}</p></div><button className="button danger-soft" onClick={props.onRestore} disabled={props.busy === `restore-${props.checkpoint.id}`}><RotateCcw size={16} />回到这个版本</button></header>
         {props.checkpoint.taskText && <div className="task-summary"><Sparkles size={17} /><div><strong>当时交给 Agent 的任务</strong><p>{props.checkpoint.taskText}</p></div></div>}
         <div className="diff-summary"><span><FileCode2 size={16} />{props.checkpoint.changedFiles.length} 个文件</span><b>+{props.checkpoint.insertions}</b><em>−{props.checkpoint.deletions}</em></div>
-        {props.loading ? <LoadingView label="正在整理这次修改…" compact /> : !props.diff || props.diff.files.length === 0 ? <div className="empty-diff"><CheckCircle2 size={26} /><strong>这个保存点没有文件内容变化</strong><span>它用于记录一个安全边界。</span></div> : (
+        {props.changePresentation === 'feature' ? <FeatureChangeView checkpoint={props.checkpoint} /> : props.loading ? <LoadingView label="正在整理这次修改…" compact /> : !props.diff || props.diff.files.length === 0 ? <div className="empty-diff"><CheckCircle2 size={26} /><strong>这个保存点没有文件内容变化</strong><span>它用于记录一个安全边界。</span></div> : (
           <div className="diff-workspace">
             <div className="file-list" role="listbox" aria-label="修改的文件">{props.diff.files.map((file) => <button key={file.path} className={(current?.path === file.path) ? 'active' : ''} onClick={() => setActiveFile(file.path)}><FileCode2 size={15} /><span>{file.path}</span><small className={file.kind}>{file.kind === 'added' ? '新增' : file.kind === 'deleted' ? '删除' : file.kind === 'renamed' ? '改名' : '修改'}</small></button>)}</div>
             <div className="patch-panel">{current && <><div className="patch-header"><span>{current.path}</span><span><b>+{current.insertions}</b> <em>−{current.deletions}</em></span></div>{current.binary ? <div className="binary-note">这是二进制文件，无法显示逐行差异。</div> : <PatchView patch={current.patch} />}</>}</div>
@@ -903,6 +1021,17 @@ function LanguagePreferences(): ReactNode {
       </div>
     </section>
   )
+}
+
+function ChangePresentationPreferences(): ReactNode {
+  const [presentation, setPresentation] = useState<ChangePresentation>(savedChangePresentation)
+
+  useEffect(() => {
+    window.localStorage.setItem(CHANGE_PRESENTATION_STORAGE_KEY, presentation)
+    window.dispatchEvent(new CustomEvent<ChangePresentation>('vibegit:change-presentation', { detail: presentation }))
+  }, [presentation])
+
+  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><Sparkles size={19} /><div><h2>保存点显示方式</h2><p>为非程序员显示大白话的功能变化；也可随时切回完整代码差异。</p></div></div><fieldset className="change-presentation-options"><legend>查看这次改了什么</legend><label className={presentation === 'feature' ? 'active' : ''}><input type="radio" name="change-presentation" value="feature" checked={presentation === 'feature'} onChange={() => setPresentation('feature')} /><span><strong>功能变化</strong><small>新增、改进和删除了哪些功能</small></span></label><label className={presentation === 'code' ? 'active' : ''}><input type="radio" name="change-presentation" value="code" checked={presentation === 'code'} onChange={() => setPresentation('code')} /><span><strong>代码变更</strong><small>文件列表与逐行代码差异</small></span></label></fieldset></div></section>
 }
 
 function DataDirectoryPreferences(): ReactNode {

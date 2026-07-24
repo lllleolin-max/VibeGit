@@ -19,6 +19,7 @@ import type {
   GitHubSyncResult,
   HealthStatus,
   Project,
+  RecordAgentSummaryInput,
   RestorePreview,
   RestoreRecord,
   SensitiveRisk,
@@ -112,7 +113,7 @@ export class VibeGitService {
       timeoutMs: commandTimeoutMs
     }))
     this.checkpoints = new CheckpointEngine(this.database, this.git)
-    this.agentEvents = new AgentEventService(this.database, this.checkpoints)
+    this.agentEvents = new AgentEventService(this.database, this.checkpoints, dataDirectory)
     this.github = new GitHubProvider(this.database, this.git, this.checkpoints, {
       ...(ghExecutable ? { ghExecutable } : {}),
       dataDirectory,
@@ -311,6 +312,10 @@ export class VibeGitService {
 
   async handleAgentEvent(event: AgentEvent): Promise<AgentEventResult> {
     return await this.agentEvents.handle(event)
+  }
+
+  async recordAgentSummary(input: RecordAgentSummaryInput): Promise<void> {
+    await this.agentEvents.recordSummary(input)
   }
 
   listAgentEvents(projectId: string) {
