@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
-import { appendFile, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { defaultDataDirectory, VibeGitService } from '@vibegit/core'
 import {
@@ -18,6 +19,50 @@ import {
 let service: VibeGitService | undefined
 let mainWindow: BrowserWindow | undefined
 let diagnosticsPath = ''
+
+interface DesktopPreferences {
+  dataDirectory?: string
+}
+
+function preferencesPath(): string {
+  return join(app.getPath('userData'), 'vibegit-preferences.json')
+}
+
+async function readPreferences(): Promise<DesktopPreferences> {
+  try {
+    const value = JSON.parse(await readFile(preferencesPath(), 'utf8')) as Record<string, unknown>
+    return typeof value.dataDirectory === 'string' && value.dataDirectory.trim() ? { dataDirectory: resolve(value.dataDirectory) } : {}
+  } catch {
+    return {}
+  }
+}
+
+async function savePreferences(preferences: DesktopPreferences): Promise<void> {
+  await mkdir(app.getPath('userData'), { recursive: true })
+  await writeFile(preferencesPath(), JSON.stringify(preferences, null, 2), 'utf8')
+}
+
+async function runHidden(executable: string, args: string[]): Promise<{ code: number; output: string }> {
+  return await new Promise((resolveResult, reject) => {
+    const child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''
+    const append = (chunk: Buffer): void => { output = `${output}${chunk.toString('utf8')}`.slice(-4_000) }
+    child.stdout.on('data', append)
+    child.stderr.on('data', append)
+    child.once('error', reject)
+    child.once('close', (code) => resolveResult({ code: code ?? -1, output }))
+  })
+}
+
+async function installGitHubCli(): Promise<void> {
+  if (process.platform !== 'win32') throw new Error('Automatic GitHub CLI installation is currently available on Windows only')
+  const result = await runHidden('winget.exe', [
+    'install', '--id', 'GitHub.cli', '--exact', '--silent',
+    '--accept-package-agreements', '--accept-source-agreements'
+  ])
+  const alreadyInstalled = /already installed|no available upgrade/i.test(result.output)
+  if (result.code !== 0 && !alreadyInstalled) throw new Error(`GitHub CLI installation failed: ${result.output || `exit code ${result.code}`}`)
+}
 
 function rendererEntryPath(): string {
   return join(__dirname, '../renderer/index.html')
@@ -89,6 +134,14 @@ function registerHandler<TArgs extends unknown[], TResult>(
 
 function requiredService(): VibeGitService {
   if (!service) throw new Error('VibeGit service is not ready')
+  return service
+}
+
+function reloadService(): VibeGitService {
+  const current = requiredService()
+  const { dataDirectory, commandTimeoutMs } = current.settings
+  current.close()
+  service = new VibeGitService({ dataDirectory, commandTimeoutMs })
   return service
 }
 
@@ -205,6 +258,36 @@ function registerIpc(): void {
   registerHandler(IPC_CHANNELS.agentStatus, () => requiredService().agentStatus())
   registerHandler(IPC_CHANNELS.listAgentEvents, (projectId: string) => requiredService().listAgentEvents(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.getSettings, () => requiredService().settings)
+  registerHandler(IPC_CHANNELS.selectDataDirectory, async () => {
+    const result = await dialog.showOpenDialog(mainWindow!, {
+      title: '选择 VibeGit 本地记录位置',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    return result.canceled ? null : result.filePaths[0] ?? null
+  })
+  registerHandler(IPC_CHANNELS.setDataDirectory, async (path: string) => {
+    const dataDirectory = resolve(requireString(path, 'path', 10_000))
+    await mkdir(dataDirectory, { recursive: true })
+    await savePreferences({ dataDirectory })
+    return { dataDirectory, restartRequired: dataDirectory !== requiredService().settings.dataDirectory }
+  })
+  registerHandler(IPC_CHANNELS.checkEnvironment, async () => {
+    let github = await requiredService().githubStatus()
+    let githubCliInstallAttempted = false
+    if (!github.installed) {
+      githubCliInstallAttempted = true
+      await installGitHubCli()
+      github = await reloadService().githubStatus()
+    }
+    const agents = await requiredService().agentStatus()
+    return {
+      github,
+      agents,
+      githubCliInstallAttempted,
+      githubCliInstalled: githubCliInstallAttempted && github.installed,
+      message: github.installed ? 'Environment check completed.' : 'GitHub CLI is not available.'
+    }
+  })
 }
 
 async function createWindow(): Promise<void> {
@@ -257,7 +340,8 @@ if (!ownsSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     app.setAppUserModelId('com.vibegit.desktop')
-    const dataDirectory = process.env.VIBEGIT_DATA_DIR || defaultDataDirectory()
+    const preferences = await readPreferences()
+    const dataDirectory = process.env.VIBEGIT_DATA_DIR || preferences.dataDirectory || defaultDataDirectory()
     await mkdir(join(dataDirectory, 'logs'), { recursive: true })
     diagnosticsPath = join(dataDirectory, 'logs', 'diagnostics.jsonl')
     service = new VibeGitService({ dataDirectory })

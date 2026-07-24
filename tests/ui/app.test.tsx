@@ -86,6 +86,9 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     agentStatus: vi.fn(() => success(agentStatus)),
     listAgentEvents: vi.fn(() => success([])),
     getSettings: vi.fn(() => success({ dataDirectory: 'C:\\VibeGit', commandTimeoutMs: 20_000 })),
+    selectDataDirectory: vi.fn(() => success(null)),
+    setDataDirectory: vi.fn((path) => success({ dataDirectory: path, restartRequired: true })),
+    checkEnvironment: vi.fn(() => success({ github: { installed: true, authenticated: false, message: 'ready' }, agents: agentStatus, githubCliInstallAttempted: false, githubCliInstalled: false, message: 'ready' })),
   }
   return { ...base, ...overrides }
 }
@@ -136,12 +139,49 @@ describe('VibeGit UI flow', () => {
     expect(document.documentElement.dir).toBe('rtl')
   })
 
+  it('translates visible interface labels when English is selected', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.selectOptions(await screen.findByLabelText('显示语言'), 'en')
+
+    expect(await screen.findByText('All projects')).toBeInTheDocument()
+    expect(await screen.findByText('Environment setup')).toBeInTheDocument()
+  })
+
   it('applies a saved language when the app starts', () => {
     window.localStorage.setItem('vibegit.display-language', 'ar')
     render(<App />)
 
     expect(document.documentElement.lang).toBe('ar')
     expect(document.documentElement.dir).toBe('rtl')
+  })
+
+  it('lets a user choose the next local record directory', async () => {
+    const api = mockApi({ selectDataDirectory: vi.fn(() => success('D:\\VibeGit Records')) })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.click(await screen.findByRole('button', { name: '选择文件夹' }))
+
+    expect(api.setDataDirectory).toHaveBeenCalledWith('D:\\VibeGit Records')
+    expect(await screen.findByText(/重启 VibeGit 后会使用该位置/)).toBeInTheDocument()
+  })
+
+  it('checks the environment and reports detected tools', async () => {
+    const api = mockApi()
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.click(await screen.findByRole('button', { name: '检测配置环境' }))
+
+    expect(api.checkEnvironment).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/GitHub CLI：已就绪/)).toBeInTheDocument()
   })
 
   it('explains that browser compatibility mode cannot select a local folder', async () => {

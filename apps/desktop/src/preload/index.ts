@@ -32,7 +32,10 @@ const api: VibeGitApi = {
   closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.closeWindow),
   agentStatus: () => ipcRenderer.invoke(IPC_CHANNELS.agentStatus),
   listAgentEvents: (projectId) => ipcRenderer.invoke(IPC_CHANNELS.listAgentEvents, projectId),
-  getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings)
+  getSettings: () => ipcRenderer.invoke(IPC_CHANNELS.getSettings),
+  selectDataDirectory: () => ipcRenderer.invoke(IPC_CHANNELS.selectDataDirectory),
+  setDataDirectory: (path) => ipcRenderer.invoke(IPC_CHANNELS.setDataDirectory, path),
+  checkEnvironment: () => ipcRenderer.invoke(IPC_CHANNELS.checkEnvironment)
 }
 
 contextBridge.exposeInMainWorld('vibegit', api)

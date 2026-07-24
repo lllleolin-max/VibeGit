@@ -59,7 +59,10 @@ if (!browserWindow.vibegit) {
     closeWindow: () => Promise.resolve(ok(true)),
     agentStatus: () => invoke('agentStatus'),
     listAgentEvents: (projectId) => invoke('listAgentEvents', [projectId]),
-    getSettings: () => invoke('getSettings')
+    getSettings: () => invoke('getSettings'),
+    selectDataDirectory: () => invoke('selectDataDirectory'),
+    setDataDirectory: (path) => invoke('setDataDirectory', [path]),
+    checkEnvironment: () => invoke('checkEnvironment')
   }
   browserWindow.vibegit = api
 }

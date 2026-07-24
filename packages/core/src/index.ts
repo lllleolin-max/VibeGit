@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
@@ -53,6 +54,15 @@ export function defaultDataDirectory(): string {
   return resolve(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'vibegit')
 }
 
+function bundledGitHubCliExecutable(): string | undefined {
+  if (process.platform !== 'win32') return undefined
+  const candidates = [
+    process.env.ProgramFiles ? join(process.env.ProgramFiles, 'GitHub CLI', 'gh.exe') : undefined,
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'GitHub CLI', 'gh.exe') : undefined
+  ]
+  return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
+}
+
 async function executableOnPath(name: string): Promise<boolean> {
   const locator = process.platform === 'win32' ? 'where.exe' : 'which'
   return await new Promise<boolean>((resolvePromise) => {
@@ -73,9 +83,10 @@ export class VibeGitService {
   constructor(options: VibeGitServiceOptions = {}) {
     const dataDirectory = resolve(options.dataDirectory ?? defaultDataDirectory())
     const commandTimeoutMs = options.commandTimeoutMs ?? 20_000
+    const ghExecutable = options.ghExecutable ?? bundledGitHubCliExecutable()
     this.settings = {
       ...(options.gitExecutable ? { gitExecutable: options.gitExecutable } : {}),
-      ...(options.ghExecutable ? { ghExecutable: options.ghExecutable } : {}),
+      ...(ghExecutable ? { ghExecutable } : {}),
       dataDirectory,
       commandTimeoutMs
     }
@@ -87,7 +98,7 @@ export class VibeGitService {
     this.checkpoints = new CheckpointEngine(this.database, this.git)
     this.agentEvents = new AgentEventService(this.database, this.checkpoints)
     this.github = new GitHubProvider(this.database, this.git, this.checkpoints, {
-      ...(options.ghExecutable ? { ghExecutable: options.ghExecutable } : {}),
+      ...(ghExecutable ? { ghExecutable } : {}),
       dataDirectory,
       timeoutMs: commandTimeoutMs
     })

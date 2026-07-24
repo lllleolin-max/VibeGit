@@ -77,7 +77,16 @@ const actions: Record<keyof VibeGitApi, (args: unknown[]) => unknown | Promise<u
   closeWindow: () => true,
   agentStatus: () => service.agentStatus(),
   listAgentEvents: (args) => service.listAgentEvents(argument<string>(args, 0)),
-  getSettings: () => service.settings
+  getSettings: () => service.settings,
+  selectDataDirectory: () => null,
+  setDataDirectory: () => ({ dataDirectory: service.settings.dataDirectory, restartRequired: false }),
+  checkEnvironment: async () => ({
+    github: await service.githubStatus(),
+    agents: await service.agentStatus(),
+    githubCliInstallAttempted: false,
+    githubCliInstalled: false,
+    message: 'Browser mode cannot install desktop dependencies.'
+  })
 }
 
 function sendJson(response: ServerResponse, status: number, body: unknown): void {

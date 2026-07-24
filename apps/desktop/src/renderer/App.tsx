@@ -44,6 +44,7 @@ import type {
   AppSettings,
   Checkpoint,
   CheckpointDiff,
+  EnvironmentCheckResult,
   GitHubCliStatus,
   Project,
   PublicError,
@@ -75,6 +76,53 @@ const DISPLAY_LANGUAGES: ReadonlyArray<{ value: DisplayLanguage; label: string; 
 ]
 
 const LANGUAGE_STORAGE_KEY = 'vibegit.display-language'
+
+type TranslationSet = Partial<Record<DisplayLanguage, string>>
+
+const UI_TRANSLATIONS: Record<string, TranslationSet> = {
+  '所有项目': { 'zh-TW': '所有專案', en: 'All projects', ja: 'すべてのプロジェクト', ko: '모든 프로젝트', ru: 'Все проекты', ar: 'كل المشاريع' },
+  '最近项目': { 'zh-TW': '最近專案', en: 'Recent projects', ja: '最近のプロジェクト', ko: '최근 프로젝트', ru: 'Недавние проекты', ar: 'المشاريع الأخيرة' },
+  '添加项目': { 'zh-TW': '新增專案', en: 'Add project', ja: 'プロジェクトを追加', ko: '프로젝트 추가', ru: 'Добавить проект', ar: 'إضافة مشروع' },
+  '设置与连接': { 'zh-TW': '設定與連線', en: 'Settings & connections', ja: '設定と接続', ko: '설정 및 연결', ru: 'Настройки и подключения', ar: 'الإعدادات والاتصالات' },
+  '选择项目文件夹': { 'zh-TW': '選擇專案資料夾', en: 'Choose project folder', ja: 'プロジェクトフォルダーを選択', ko: '프로젝트 폴더 선택', ru: 'Выбрать папку проекта', ar: 'اختر مجلد المشروع' },
+  '为这个项目开启版本保护': { 'zh-TW': '為這個專案開啟版本保護', en: 'Enable version protection for this project', ja: 'このプロジェクトのバージョン保護を有効にする', ko: '이 프로젝트의 버전 보호 켜기', ru: 'Включить защиту версий для проекта', ar: 'تفعيل حماية الإصدارات لهذا المشروع' },
+  '开启版本保护': { 'zh-TW': '開啟版本保護', en: 'Enable version protection', ja: 'バージョン保護を有効化', ko: '버전 보호 켜기', ru: 'Включить защиту версий', ar: 'تفعيل حماية الإصدارات' },
+  '手动保存': { 'zh-TW': '手動儲存', en: 'Save checkpoint', ja: '手動保存', ko: '수동 저장', ru: 'Сохранить точку', ar: 'حفظ نقطة' },
+  '保存点': { 'zh-TW': '儲存點', en: 'Checkpoints', ja: '保存ポイント', ko: '저장 지점', ru: 'Точки сохранения', ar: 'نقاط الحفظ' },
+  '版本保护': { 'zh-TW': '版本保護', en: 'Version protection', ja: 'バージョン保護', ko: '버전 보호', ru: 'Защита версий', ar: 'حماية الإصدارات' },
+  '安全回退': { 'zh-TW': '安全回退', en: 'Safe restore', ja: '安全に復元', ko: '안전하게 복원', ru: 'Безопасное восстановление', ar: 'استعادة آمنة' },
+  'GitHub 备份': { 'zh-TW': 'GitHub 備份', en: 'GitHub backup', ja: 'GitHub バックアップ', ko: 'GitHub 백업', ru: 'Резервная копия GitHub', ar: 'نسخ GitHub الاحتياطي' },
+  '界面语言': { 'zh-TW': '介面語言', en: 'Interface language', ja: '表示言語', ko: '표시 언어', ru: 'Язык интерфейса', ar: 'لغة الواجهة' },
+  '显示语言': { 'zh-TW': '顯示語言', en: 'Display language', ja: '表示言語', ko: '표시 언어', ru: 'Язык отображения', ar: 'لغة العرض' },
+  '本地数据': { 'zh-TW': '本機資料', en: 'Local data', ja: 'ローカルデータ', ko: '로컬 데이터', ru: 'Локальные данные', ar: 'البيانات المحلية' },
+  '本地记录位置': { 'zh-TW': '本機記錄位置', en: 'Local record location', ja: 'ローカル記録の場所', ko: '로컬 기록 위치', ru: 'Расположение локальных записей', ar: 'موقع السجلات المحلية' },
+  '选择文件夹': { 'zh-TW': '選擇資料夾', en: 'Choose folder', ja: 'フォルダーを選択', ko: '폴더 선택', ru: 'Выбрать папку', ar: 'اختر مجلداً' },
+  '配置环境': { 'zh-TW': '設定環境', en: 'Environment setup', ja: '環境設定', ko: '환경 설정', ru: 'Настройка окружения', ar: 'إعداد البيئة' },
+  '检测配置环境': { 'zh-TW': '檢測設定環境', en: 'Check environment', ja: '環境を確認', ko: '환경 확인', ru: 'Проверить окружение', ar: 'فحص البيئة' },
+  'Agent 连接': { 'zh-TW': 'Agent 連線', en: 'Agent connections', ja: 'Agent 接続', ko: 'Agent 연결', ru: 'Подключения Agent', ar: 'اتصالات الوكلاء' },
+  '默认安全规则': { 'zh-TW': '預設安全規則', en: 'Default safety rules', ja: '既定の安全ルール', ko: '기본 안전 규칙', ru: 'Правила безопасности по умолчанию', ar: 'قواعد الأمان الافتراضية' },
+  'GitHub 私有备份': { 'zh-TW': 'GitHub 私人備份', en: 'GitHub private backup', ja: 'GitHub 非公開バックアップ', ko: 'GitHub 비공개 백업', ru: 'Приватное резервное копирование GitHub', ar: 'نسخ GitHub الاحتياطي الخاص' },
+  '创建新的私有仓库': { 'zh-TW': '建立新的私人儲存庫', en: 'Create a new private repository', ja: '新しい非公開リポジトリを作成', ko: '새 비공개 저장소 만들기', ru: 'Создать новый приватный репозиторий', ar: 'إنشاء مستودع خاص جديد' },
+  '连接现有私有仓库': { 'zh-TW': '連接現有私人儲存庫', en: 'Connect an existing private repository', ja: '既存の非公開リポジトリに接続', ko: '기존 비공개 저장소 연결', ru: 'Подключить существующий приватный репозиторий', ar: 'ربط مستودع خاص موجود' },
+  '返回': { 'zh-TW': '返回', en: 'Back', ja: '戻る', ko: '뒤로', ru: 'Назад', ar: 'رجوع' },
+  '保存': { 'zh-TW': '儲存', en: 'Save', ja: '保存', ko: '저장', ru: 'Сохранить', ar: 'حفظ' },
+  '已检测': { 'zh-TW': '已檢測', en: 'Detected', ja: '検出済み', ko: '감지됨', ru: 'Обнаружено', ar: 'تم الكشف' },
+  '未找到': { 'zh-TW': '未找到', en: 'Not found', ja: '見つかりません', ko: '찾을 수 없음', ru: 'Не найдено', ar: 'غير موجود' },
+  '尚未检测': { 'zh-TW': '尚未檢測', en: 'Not checked yet', ja: '未確認', ko: '아직 확인되지 않음', ru: 'Еще не проверено', ar: 'لم يتم الفحص بعد' }
+}
+
+function translateVisibleUi(language: DisplayLanguage): void {
+  if (!document.body) return
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  const nodes: Text[] = []
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+  for (const node of nodes) {
+    const original = Object.entries(UI_TRANSLATIONS).find(([, values]) => Object.values(values).includes(node.data))?.[0] ?? node.data
+    const translated = language === 'zh-CN' ? original : UI_TRANSLATIONS[original]?.[language]
+    const nextValue = translated ?? original
+    if (node.data !== nextValue) node.data = nextValue
+  }
+}
 
 function isDisplayLanguage(value: string | null): value is DisplayLanguage {
   return DISPLAY_LANGUAGES.some((language) => language.value === value)
@@ -114,10 +162,12 @@ function errorFrom(value: unknown): PublicError {
 function formatRelativeTime(value?: string): string {
   if (!value) return '还没有保存点'
   const delta = Date.now() - Date.parse(value)
-  if (delta < 60_000) return '刚刚'
-  if (delta < 3_600_000) return `${Math.floor(delta / 60_000)} 分钟前`
-  if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)} 小时前`
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
+  const locale = document.documentElement.lang || 'zh-CN'
+  const relative = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' })
+  if (delta < 60_000) return relative.format(0, 'second')
+  if (delta < 3_600_000) return relative.format(-Math.floor(delta / 60_000), 'minute')
+  if (delta < 86_400_000) return relative.format(-Math.floor(delta / 3_600_000), 'hour')
+  return new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
 function checkpointType(type: Checkpoint['type']): { label: string; tone: string } {
@@ -152,9 +202,20 @@ export function App(): ReactNode {
   const [diff, setDiff] = useState<CheckpointDiff>()
   const [diffLoading, setDiffLoading] = useState(false)
   const [modal, setModal] = useState<Modal>(null)
+  const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>(savedDisplayLanguage)
 
   useEffect(() => {
-    applyDisplayLanguage(savedDisplayLanguage())
+    applyDisplayLanguage(displayLanguage)
+    translateVisibleUi(displayLanguage)
+    const observer = new MutationObserver(() => translateVisibleUi(displayLanguage))
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true })
+    return () => observer.disconnect()
+  }, [displayLanguage])
+
+  useEffect(() => {
+    const onLanguageChange = (event: Event): void => setDisplayLanguage((event as CustomEvent<DisplayLanguage>).detail)
+    window.addEventListener('vibegit:language-change', onLanguageChange)
+    return () => window.removeEventListener('vibegit:language-change', onLanguageChange)
   }, [])
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === selectedId), [projects, selectedId])
@@ -368,6 +429,8 @@ export function App(): ReactNode {
           <>
             <SettingsView onBack={() => setPage(selectedProject ? 'project' : 'projects')} />
             <LanguagePreferences />
+            <DataDirectoryPreferences />
+            <EnvironmentPreferences />
           </>
         ) : page === 'projects' || !selectedProject ? (
           <ProjectsHome projects={projects} busy={busy} onAdd={() => void chooseProject()} onSelect={selectProject} />
@@ -628,7 +691,7 @@ function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff
   return (
     <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose() }}>
       <aside className="checkpoint-drawer" aria-label="保存点详情">
-        <header className="drawer-header"><button className="icon-button" aria-label="关闭详情" onClick={props.onClose}><X size={18} /></button><div><span className={`pill ${type.tone}`}>{type.label}</span><h2>{props.checkpoint.title}</h2><p>{new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(props.checkpoint.createdAt))} · {agentLabel(props.checkpoint.agent)}</p></div><button className="button danger-soft" onClick={props.onRestore} disabled={props.busy === `restore-${props.checkpoint.id}`}><RotateCcw size={16} />回到这个版本</button></header>
+        <header className="drawer-header"><button className="icon-button" aria-label="关闭详情" onClick={props.onClose}><X size={18} /></button><div><span className={`pill ${type.tone}`}>{type.label}</span><h2>{props.checkpoint.title}</h2><p>{new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(props.checkpoint.createdAt))} · {agentLabel(props.checkpoint.agent)}</p></div><button className="button danger-soft" onClick={props.onRestore} disabled={props.busy === `restore-${props.checkpoint.id}`}><RotateCcw size={16} />回到这个版本</button></header>
         {props.checkpoint.taskText && <div className="task-summary"><Sparkles size={17} /><div><strong>当时交给 Agent 的任务</strong><p>{props.checkpoint.taskText}</p></div></div>}
         <div className="diff-summary"><span><FileCode2 size={16} />{props.checkpoint.changedFiles.length} 个文件</span><b>+{props.checkpoint.insertions}</b><em>−{props.checkpoint.deletions}</em></div>
         {props.loading ? <LoadingView label="正在整理这次修改…" compact /> : !props.diff || props.diff.files.length === 0 ? <div className="empty-diff"><CheckCircle2 size={26} /><strong>这个保存点没有文件内容变化</strong><span>它用于记录一个安全边界。</span></div> : (
@@ -818,6 +881,7 @@ function LanguagePreferences(): ReactNode {
   useEffect(() => {
     applyDisplayLanguage(displayLanguage)
     window.localStorage.setItem(LANGUAGE_STORAGE_KEY, displayLanguage)
+    window.dispatchEvent(new CustomEvent<DisplayLanguage>('vibegit:language-change', { detail: displayLanguage }))
   }, [displayLanguage])
 
   return (
@@ -839,6 +903,48 @@ function LanguagePreferences(): ReactNode {
       </div>
     </section>
   )
+}
+
+function DataDirectoryPreferences(): ReactNode {
+  const [settings, setSettings] = useState<AppSettings>()
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState<string>()
+
+  useEffect(() => { void window.vibegit.getSettings().then((result) => setSettings(unwrap(result))) }, [])
+
+  const chooseDirectory = async (): Promise<void> => {
+    setBusy(true)
+    setNotice(undefined)
+    try {
+      const path = unwrap(await window.vibegit.selectDataDirectory())
+      if (!path) return
+      const update = unwrap(await window.vibegit.setDataDirectory(path))
+      setSettings((current) => current ? { ...current, dataDirectory: update.dataDirectory } : current)
+      setNotice(update.restartRequired ? '已保存新的记录位置。重启 VibeGit 后会使用该位置，现有记录不会被删除。' : '记录位置未变更。')
+    } catch (value) {
+      setNotice(errorFrom(value).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><HardDrive size={19} /><div><h2>本地记录位置</h2><p>选择保存保护记录、诊断日志和 VibeGit 专用 SSH 数据的本地文件夹。</p></div></div><div className="preferences-action"><code title={settings?.dataDirectory}>{settings?.dataDirectory ?? '读取中…'}</code><button className="button secondary small" disabled={busy} onClick={() => void chooseDirectory()}>{busy ? <LoaderCircle className="spin" size={14} /> : <FolderOpen size={14} />}选择文件夹</button></div>{notice && <p className="preferences-notice">{notice}</p>}</div></section>
+}
+
+function EnvironmentPreferences(): ReactNode {
+  const [result, setResult] = useState<EnvironmentCheckResult>()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string>()
+
+  const check = async (): Promise<void> => {
+    setBusy(true)
+    setError(undefined)
+    try { setResult(unwrap(await window.vibegit.checkEnvironment())) }
+    catch (value) { setError(errorFrom(value).message) }
+    finally { setBusy(false) }
+  }
+
+  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><TerminalSquare size={19} /><div><h2>配置环境</h2><p>扫描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。</p></div></div><div className="preferences-action"><div className="environment-result">{result ? <><span className={result.github.installed ? 'status-dot safe' : 'status-dot'} />GitHub CLI：{result.github.installed ? '已就绪' : '未找到'} · Codex：{result.agents.codex.installed ? '已检测' : '未找到'} · Claude Code：{result.agents.claudeCode.installed ? '已检测' : '未找到'}</> : '尚未检测'}</div><button className="button primary small" disabled={busy} onClick={() => void check()}>{busy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}检测配置环境</button></div>{result?.githubCliInstallAttempted && <p className="preferences-notice">{result.githubCliInstalled ? '已自动安装 GitHub CLI；如仍未显示，请重启 VibeGit 后再次检测。' : result.message}</p>}{error && <p className="preferences-notice error">{error}</p>}</div></section>
 }
 
 function SettingsView({ onBack }: { onBack(): void }): ReactNode {

@@ -223,6 +223,19 @@ export interface AppSettings {
   commandTimeoutMs: number
 }
 
+export interface DataDirectoryUpdateResult {
+  dataDirectory: string
+  restartRequired: boolean
+}
+
+export interface EnvironmentCheckResult {
+  github: GitHubCliStatus
+  agents: AgentConnectionStatus
+  githubCliInstallAttempted: boolean
+  githubCliInstalled: boolean
+  message: string
+}
+
 export interface HealthStatus {
   ready: boolean
   database: 'ok'
@@ -370,7 +383,10 @@ export const IPC_CHANNELS = {
   closeWindow: 'window:close',
   agentStatus: 'agents:status',
   listAgentEvents: 'agents:list-events',
-  getSettings: 'settings:get'
+  getSettings: 'settings:get',
+  selectDataDirectory: 'dialog:select-data-directory',
+  setDataDirectory: 'settings:set-data-directory',
+  checkEnvironment: 'environment:check'
 } as const
 
 export interface AgentConnectionStatus {
@@ -410,6 +426,9 @@ export interface VibeGitApi {
   agentStatus(): Promise<ApiResult<AgentConnectionStatus>>
   listAgentEvents(projectId: string): Promise<ApiResult<AgentEventRecord[]>>
   getSettings(): Promise<ApiResult<AppSettings>>
+  selectDataDirectory(): Promise<ApiResult<string | null>>
+  setDataDirectory(path: string): Promise<ApiResult<DataDirectoryUpdateResult>>
+  checkEnvironment(): Promise<ApiResult<EnvironmentCheckResult>>
 }
 
 export function parseAgentEvent(input: unknown): AgentEvent {
