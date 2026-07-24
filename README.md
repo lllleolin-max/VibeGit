@@ -61,9 +61,9 @@ pnpm dev
 
 也可以在 Windows 上双击 [`启动 VibeGit.bat`](启动%20VibeGit.bat) 启动桌面版。
 
-### 使用 Codex 一键部署
+### 使用 Codex 或 Claude Code 一键部署
 
-在仓库文件夹中，将下面这条指令复制并粘贴给 Codex：
+在仓库文件夹中，将下面这条指令复制并粘贴给 Codex 或 Claude Code：
 
 ```text
 请在当前工作区一键部署 VibeGit：检查 Node.js 24+、pnpm 9+ 和 Git 2.23+，如已满足则执行 pnpm install，然后运行 pnpm dev；如果缺少依赖，请先说明并安装。完成后告诉我启动结果和下一步操作。
@@ -98,11 +98,15 @@ VibeGit 的默认立场是：**先保护，再操作。**
 
 ## 当前发布状态
 
-**v0.1.1 · 含 Windows 安装包的可运行源码 MVP**
+**v0.1.1 · 含 Windows 安装包的可运行源码**
 
 已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
 
 Codex 与 Claude Code 的自动安装器仍在下一阶段；仓库已提供 Hook 模板，并清楚记录了验证范围与外部依赖。查看[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
+
+## 支持与反馈
+
+如果 VibeGit 对你有帮助，欢迎在 [GitHub 上给我们一个 Star](https://github.com/lllleolin-max/VibeGit)。也非常期待你通过 [Issues](https://github.com/lllleolin-max/VibeGit/issues) 提出宝贵建议、使用体验或功能需求。
 
 ## 面向开发与贡献
 

@@ -59,9 +59,9 @@ On first launch, choose a project folder and select **Enable version protection*
 
 On Windows, you can also double-click [`启动 VibeGit.bat`](启动%20VibeGit.bat).
 
-### One-click deployment with Codex
+### One-click deployment with Codex or Claude Code
 
-Copy and paste this instruction into Codex from the repository folder:
+Copy and paste this instruction into Codex or Claude Code from the repository folder:
 
 ```text
 Deploy VibeGit in the current workspace: check that Node.js 24+, pnpm 9+, and Git 2.23+ are available; if they are, run pnpm install and then pnpm dev. If a dependency is missing, explain it and install it first. Report the launch result and next steps when finished.
@@ -96,11 +96,15 @@ Backups use a dedicated `vibegit` remote and never overwrite your existing `orig
 
 ## Release status
 
-**v0.1.1 · runnable source MVP with Windows installer**
+**v0.1.1 · runnable source with Windows installer**
 
 The verified core workflow includes local version protection, checkpoints and timeline, diffs, previewed restore and undo, shelving, private GitHub backup, the Electron desktop UI, and the unified Agent Events CLI.
 
 Automatic installers for Codex and Claude Code are a follow-up. The repository includes hook templates and documents their verification boundaries and external dependencies. See the [final validation record](docs/FINAL_VALIDATION.md) for executed tests and current limitations.
+
+## Support and feedback
+
+If VibeGit helps you, please [give us a Star on GitHub](https://github.com/lllleolin-max/VibeGit). We also welcome your suggestions, experience reports, and feature requests through [Issues](https://github.com/lllleolin-max/VibeGit/issues).
 
 ## Development and contribution
 
