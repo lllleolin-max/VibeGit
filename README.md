@@ -1,75 +1,102 @@
 # VibeGit
 
-![VibeGit logo](assets/branding/vibegit-project-logo.png)
+<p align="center">
+  <img src="assets/branding/vibegit-project-logo.png" alt="VibeGit" width="360" />
+</p>
 
-VibeGit 是一个面向非程序员 Vibe Coder 的本地桌面版本保险箱。它把 Git 的底层能力包装成“项目、保存点、这次改了什么、暂时收起、回到这个版本、备份到 GitHub”，让 Codex、Claude Code 等 Agent 的每轮修改都可理解、可恢复。
+<p align="center">
+  <strong>让每一次 AI 修改，都有迹可循、随时可回。</strong><br />
+  给 Codex、Claude Code 与每一位 Vibe Coder 的本地版本保险箱。
+</p>
 
-当前仓库交付的是可运行的源码 MVP，不是安装包。P0 本地闭环、统一 Agent 事件 CLI、GitHub Provider 与真实 Electron UI 已实现；Codex/Claude Code 自动安装器属于 P1，当前只提供经过验证或明确标注限制的 Hook 模板。
+<p align="center">
+  <a href="#开始使用">开始使用</a> ·
+  <a href="#它能做什么">核心能力</a> ·
+  <a href="#安全不是一句口号">安全设计</a> ·
+  <a href="#当前发布状态">发布状态</a>
+</p>
 
-## 安全模型
+**语言 / Languages：** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
 
-- 保存点写入 `refs/vibegit/checkpoints/*`，使用独立临时 index，不改变用户分支、HEAD 或真实暂存区。
-- 禁止 `reset --hard`、`clean -fd`、force push、修改全局 Git 配置和删除 `.git`。
-- 回退前创建可验证保险点；冲突的未跟踪/忽略文件先进入 Git 私有目录下的 `vibegit/recovery`；用户项目中的 `.vibegit` 会被当作普通项目数据。回退完成后可精确撤销，失败/中断后仍可从项目界面打开恢复区。
-- 恢复令牌由 SQLite 原子认领；保存、恢复、撤销和暂时收起同时受进程内队列与跨进程项目租约保护，过期操作会调和为失败状态。
-- GitHub 上传前扫描敏感路径、UTF-8/UTF-16 密钥模式、凭据、数据库、依赖/构建目录、LFS 指针和大文件；发现风险就阻断，不删除本地文件。
-- 远程只接收扫描后的独立导出提交链，不上传本地保存点的历史父链；Private 可见性在同步前复核，实际 push 使用同一个已校验 URL。
-- 选择已有 Git 项目时必须选择仓库根目录，避免跨目录保存或恢复；Agent 从其子目录运行时仍会自动归属到该项目。
-- Renderer 无 Node/文件系统权限，只能通过受限 preload 调用主进程允许列表。
+---
 
-## 环境
+AI 能把想法变成代码，也能在几分钟内改动数十个文件。真正让人不安的，往往不是“它能不能改”，而是：**这次到底改了什么？不满意时，能不能安全地回到之前？**
 
-- Node.js 24+
-- pnpm 9+（项目锁定 `pnpm@11.7.0`）
-- Git 2.23+
-- GitHub CLI `gh`：仅私有备份需要；不安装也不影响本地保存点
+VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、保存版本、查看改动、暂时收起、回到旧版本、备份到 GitHub。你不需要先学会 commit、branch 或 reset，也能放心让 AI 继续推进项目。
 
-## 安装与运行
+> **Every AI change, saved and reversible.**
+
+## 它能做什么
+
+| 你关心的事 | VibeGit 的做法 |
+| --- | --- |
+| AI 改完后，我怎样确认结果？ | 用时间线记录每个保存点，查看文件清单、增删统计和逐行 Diff。 |
+| 这版不对，能回去吗？ | 回退前先自动创建保险点，展示影响预览；完成后仍可撤销。 |
+| 我还没写完，先放一边可以吗？ | 将当前修改安全“暂时收起”，需要时再准确取回。 |
+| 不懂 Git 也能用吗？ | 可以。界面使用“项目”“保存点”“回到这个版本”等日常语言。 |
+| 能备份到 GitHub 吗？ | 可以。连接后可备份到 Private 仓库，且不改动你已有的 `origin`。 |
+| Codex / Claude Code 改的内容会记录吗？ | 统一 Agent 事件 CLI 可在任务前后创建保护点；已提供 Hook 模板。 |
+
+## 为 Vibe Coding 而生
+
+VibeGit 不是又一个 Git 图形客户端。它专注于一个更具体的问题：当你把实现工作交给 AI 时，如何始终保有对项目的理解与掌控。
+
+- **看得懂**：用可读的保存点、任务说明和 Diff，替代一串难记的提交哈希。
+- **回得去**：回退不是“赌一把”；先预览影响、自动留保险，并保留撤销能力。
+- **不打扰**：本地保存与恢复不依赖网络、GitHub 或 Agent 是否已安装。
+- **守得住**：每个项目独立保护；远程备份前扫描敏感信息，不替你删除本地文件。
+
+## 开始使用
+
+### 直接运行源码
+
+准备好 Node.js 24+、pnpm 9+ 和 Git 2.23+ 后，在仓库根目录运行：
 
 ```powershell
 pnpm install
 pnpm dev
 ```
 
-构建并启动生产构建：
+首次打开时，选择一个项目文件夹并点击“开启版本保护”。VibeGit 会在需要时初始化 Git、创建初始保存点；对于已有 Git 项目，它不会创建或切换普通分支。
 
-```powershell
-pnpm build
-pnpm exec electron .
-```
+也可以在 Windows 上双击 [`启动 VibeGit.bat`](启动%20VibeGit.bat) 启动桌面版。
 
-也可以直接双击 `启动 VibeGit.bat`，它会启动 Electron 桌面版。首次使用时点击“选择项目文件夹”，即可通过 Windows 原生文件夹选择器定位项目，无需手输完整路径。VibeGit 会初始化 Git（若需要）并创建初始保存点，不会创建或切换普通分支。若选择的是已有 Git 项目的子目录，应用会提示重新选择项目根目录，以避免越过你选择的范围。
-
-## Windows 安装包与桌面快捷方式
-
-发布者在仓库根目录运行：
+### 构建 Windows 安装程序
 
 ```powershell
 pnpm install
 pnpm dist:win
 ```
 
-安装程序会生成在 `release/` 目录。将其中的 `VibeGit-Setup-<版本>-x64.exe` 上传到 GitHub Release 后，用户只需下载并运行该安装程序；安装完成时会自动创建 **VibeGit** 桌面快捷方式和开始菜单入口，二者都会使用 VibeGit 方形应用图标。卸载应用不会删除用户的 VibeGit 数据目录。
+安装程序会生成在 `release/` 中。发布者可将 `VibeGit-Setup-<version>-x64.exe` 上传至 GitHub Release；安装完成后会创建桌面与开始菜单入口，卸载不会删除用户的 VibeGit 数据。
 
-## Agent 事件 CLI
+## 安全不是一句口号
 
-构建后可直接运行：
+VibeGit 的默认立场是：**先保护，再操作。**
 
-```powershell
-Get-Content event.json | node dist/cli/index.js event --stdin
-Get-Content hook.json | node dist/cli/index.js hook codex --stdin
-Get-Content hook.json | node dist/cli/index.js hook claude-code --stdin
-```
+- 保存点写入独立的 `refs/vibegit/checkpoints/*`，不改动你的分支、`HEAD` 或真实暂存区。
+- 不执行 `reset --hard`、`clean -fd`、强制推送、全局 Git 配置修改，也不删除 `.git`。
+- 恢复前自动创建可验证的保险点；发生冲突的未跟踪或忽略文件会进入 Git 私有恢复区，而不是直接丢弃。
+- GitHub 备份前扫描密钥、凭据、数据库、依赖/构建目录、LFS 指针与大文件；发现风险即阻止上传，原始文件留在本地。
+- 桌面界面没有 Node.js 或文件系统权限，只能通过受限的主进程 API 执行允许的操作。
 
-事件格式和 Hook 安装边界见 [Codex 集成](docs/CODEX_INTEGRATION.md) 与 [Claude Code 集成](docs/CLAUDE_CODE_INTEGRATION.md)。Hook 模板分别位于 `integrations/codex/vibegit` 和 `integrations/claude-code/vibegit`；模板不会擅自修改用户配置。
+完整设计请参阅[安全设计](docs/SECURITY.md)与[架构说明](docs/ARCHITECTURE.md)。
 
-## GitHub 私有备份
+## GitHub Private 备份
 
-安装 GitHub CLI 后，在项目页点击“GitHub 备份”中的“连接 GitHub 并创建 SSH 密钥”。VibeGit 会打开 GitHub 浏览器授权、在应用数据目录创建专用 Ed25519 密钥并仅上传公钥；随后即可一键创建 Private 仓库并安全备份。私钥不会写入项目目录、数据库或日志。
+安装 [GitHub CLI](https://cli.github.com/) 后，在项目页打开“GitHub 备份”，点击“连接 GitHub 并创建 SSH 密钥”。VibeGit 会通过浏览器完成授权，在应用数据目录中创建专用 Ed25519 密钥，只将公钥注册到 GitHub。
 
-VibeGit 使用专用 `vibegit` remote，不改写你现有的 `origin`。新建备份仓库使用 `ssh.github.com:443`，适合常见的受限网络；每次同步先建立 `pre_sync` 保存点并重新扫描敏感文件，只有扫描通过才把该树导出到远程 `vibegit-backup` 分支并执行非强制 push。详见 [GitHub 设置](docs/GITHUB_SETUP.md)。
+备份使用专用的 `vibegit` remote，不会覆盖或改写现有 `origin`。详细步骤见 [GitHub 设置说明](docs/GITHUB_SETUP.md)。
 
-## 验证命令
+## 当前发布状态
+
+**v0.1.0 · 可运行源码 MVP**
+
+已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
+
+Codex 与 Claude Code 的自动安装器仍在下一阶段；仓库已提供 Hook 模板，并清楚记录了验证范围与外部依赖。查看[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
+
+## 面向开发与贡献
 
 ```powershell
 pnpm lint
@@ -79,33 +106,16 @@ pnpm build
 pnpm test:cli-build
 pnpm test:cli-e2e
 pnpm test:desktop
-pnpm demo
 ```
 
-Git 测试与演示只使用系统临时目录，不碰用户真实项目。`test:desktop` 启动构建后的真实 Electron 应用，验证无白屏、健康检查、保存、diff、回退和撤销。
+项目说明与验收边界：
 
-## 目录
+- [产品规格](docs/PRODUCT_SPEC.md)
+- [架构说明](docs/ARCHITECTURE.md)
+- [安全设计](docs/SECURITY.md)
+- [验收标准](docs/ACCEPTANCE_CRITERIA.md)
+- [Codex 集成](docs/CODEX_INTEGRATION.md) · [Claude Code 集成](docs/CLAUDE_CODE_INTEGRATION.md)
 
-```text
-apps/desktop              Electron Main / Preload / React Renderer
-apps/cli                  统一 Agent 事件 CLI
-packages/git-engine       安全 Git 命令边界
-packages/checkpoint-engine 保存点、恢复区、撤销和暂时收起
-packages/database         SQLite 元数据与事务
-packages/github-provider  gh、敏感扫描和远程备份
-packages/agent-events     Agent 事件适配与幂等
-packages/core             桌面与 CLI 共用服务
-packages/shared           类型、IPC 契约与结构化错误
-integrations              Codex / Claude Code Hook 模板
-tests                     单元、集成、UI 与 Electron E2E
-docs                      产品、架构、安全与验收文档
-```
+---
 
-## 当前外部限制
-
-- GitHub 的 Private 参数、未登录/缺失状态、可见性复核、目标 URL 绑定、非强制本地远程 push 和敏感阻断均由自动化测试覆盖；发布前仍建议在安装了 GitHub CLI 的目标机器上完成一次真实授权与备份演练。
-- 本机未安装 Claude Code，模板未执行 `claude plugin validate --strict`；JSON、事件映射和适配器已测试。
-- Codex 插件模板已通过本地 validator，但自动安装器和面向普通用户的自包含 CLI 可执行文件仍是 P1。
-- `node:sqlite` 在当前 Node/Electron 版本仍会输出 ExperimentalWarning；数据库层已隔离该 API，升级运行时时必须重跑全量测试。
-
-更多信息见 [产品规格](docs/PRODUCT_SPEC.md)、[架构](docs/ARCHITECTURE.md)、[安全设计](docs/SECURITY.md) 与 [验收标准](docs/ACCEPTANCE_CRITERIA.md)。
+**把大胆的想法交给 AI，把回头路交给 VibeGit。**
