@@ -72,6 +72,22 @@ async function executableOnPath(name: string): Promise<boolean> {
   })
 }
 
+function knownAgentExecutable(name: 'codex' | 'claude'): string | undefined {
+  if (process.platform !== 'win32') return undefined
+  const candidates = [
+    process.env.APPDATA ? join(process.env.APPDATA, 'npm', `${name}.cmd`) : undefined,
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'npm', `${name}.cmd`) : undefined,
+    join(homedir(), '.local', 'bin', `${name}.exe`),
+    join(homedir(), '.local', 'bin', `${name}.cmd`),
+    join(homedir(), '.local', 'bin', name)
+  ]
+  return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
+}
+
+async function agentExecutableAvailable(name: 'codex' | 'claude'): Promise<boolean> {
+  return await executableOnPath(name) || Boolean(knownAgentExecutable(name))
+}
+
 export class VibeGitService {
   readonly settings: AppSettings
   readonly database: VibeGitDatabase
@@ -334,8 +350,8 @@ export class VibeGitService {
 
   async agentStatus(): Promise<AgentConnectionStatus> {
     const [codexInstalled, claudeInstalled] = await Promise.all([
-      executableOnPath('codex'),
-      executableOnPath('claude')
+      agentExecutableAvailable('codex'),
+      agentExecutableAvailable('claude')
     ])
     return {
       codex: {
