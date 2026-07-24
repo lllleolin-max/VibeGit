@@ -34,17 +34,6 @@ VibeGit は Git を分かりやすい操作に置き換えます。プロジェ�
 
 ## はじめに
 
-### ソースから起動する
-
-Node.js 24+、pnpm 9+、Git 2.23+ を用意し、リポジトリのルートで実行します。
-
-```powershell
-pnpm install
-pnpm dev
-```
-
-初回起動時にプロジェクトフォルダーを選び、「バージョン保護を有効にする」を選択します。必要な場合だけ Git を初期化し、初期保存ポイントを作成します。既存 Git プロジェクトの通常ブランチを作成・切替することはありません。Windows では [`启动 VibeGit.bat`](启动%20VibeGit.bat) をダブルクリックしても起動できます。
-
 ### Codex または Claude Code でワンクリックデプロイ
 
 リポジトリフォルダーで、次の指示を Codex または Claude Code にコピー＆ペーストしてください。
@@ -71,6 +60,17 @@ pnpm dist:win
 ```text
 VibeGit Skill をデプロイしてください。VibeGit は Windows インストーラーでインストール済みです。https://github.com/lllleolin-max/VibeGit から skills/vibegit-change-summary/ を取得し、先に SKILL.md を確認してから、コピーしてください（ソースを移動・削除しないでください）。インストール済み Agent のグローバル Skills ディレクトリは、Codex が %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md、Claude Code が %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md です。この端末にインストール済みの Agent だけを設定し、不足するディレクトリは作成してください。他の Skill は上書き・削除しないでください。完了後、各配置先の SKILL.md に YAML frontmatter があることを確認し、デプロイ結果と Agent の再起動が必要かを報告してください。
 ```
+
+### ソースから起動する
+
+Node.js 24+、pnpm 9+、Git 2.23+ を用意し、リポジトリのルートで実行します。
+
+```powershell
+pnpm install
+pnpm dev
+```
+
+初回起動時にプロジェクトフォルダーを選び、「バージョン保護を有効にする」を選択します。必要な場合だけ Git を初期化し、初期保存ポイントを作成します。既存 Git プロジェクトの通常ブランチを作成・切替することはありません。Windows では [`启动 VibeGit.bat`](启动%20VibeGit.bat) をダブルクリックしても起動できます。
 
 ## 安全性はスローガンではありません
 

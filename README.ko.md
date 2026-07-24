@@ -34,17 +34,6 @@ VibeGit은 Git을 프로젝트 추가, 버전 저장, 변경 확인, 임시 보�
 
 ## 시작하기
 
-### 소스에서 실행
-
-Node.js 24+, pnpm 9+, Git 2.23+를 준비한 뒤 저장소 루트에서 실행합니다.
-
-```powershell
-pnpm install
-pnpm dev
-```
-
-처음 열 때 프로젝트 폴더를 고르고 **버전 보호 활성화**를 선택하세요. 필요한 경우에만 Git을 초기화하고 초기 저장 지점을 만들며, 기존 Git 프로젝트의 일반 브랜치를 만들거나 전환하지 않습니다. Windows에서는 [`启动 VibeGit.bat`](启动%20VibeGit.bat)를 두 번 클릭해도 됩니다.
-
 ### Codex 또는 Claude Code로 원클릭 배포
 
 저장소 폴더에서 다음 지시문을 Codex 또는 Claude Code에 복사하여 붙여넣으세요.
@@ -71,6 +60,17 @@ pnpm dist:win
 ```text
 VibeGit Skill을 배포하세요. VibeGit은 Windows 설치 프로그램으로 설치되어 있습니다. https://github.com/lllleolin-max/VibeGit 에서 skills/vibegit-change-summary/를 가져와 먼저 SKILL.md를 확인한 뒤 복사하세요(소스를 이동하거나 삭제하지 마세요). 설치된 Agent의 전역 Skills 디렉터리는 Codex가 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md, Claude Code가 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md입니다. 이 컴퓨터에 설치된 Agent만 설정하고, 없는 디렉터리는 생성하세요. 다른 Skill은 덮어쓰거나 삭제하지 마세요. 완료 후 모든 대상 SKILL.md에 YAML frontmatter가 있는지 검증하고, 배포 결과와 Agent 재시작 필요 여부를 알려 주세요.
 ```
+
+### 소스에서 실행
+
+Node.js 24+, pnpm 9+, Git 2.23+를 준비한 뒤 저장소 루트에서 실행합니다.
+
+```powershell
+pnpm install
+pnpm dev
+```
+
+처음 열 때 프로젝트 폴더를 고르고 **버전 보호 활성화**를 선택하세요. 필요한 경우에만 Git을 초기화하고 초기 저장 지점을 만들며, 기존 Git 프로젝트의 일반 브랜치를 만들거나 전환하지 않습니다. Windows에서는 [`启动 VibeGit.bat`](启动%20VibeGit.bat)를 두 번 클릭해도 됩니다.
 
 ## 안전은 구호가 아닙니다
 

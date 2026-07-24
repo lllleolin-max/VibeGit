@@ -48,19 +48,6 @@ VibeGit 不是又一个 Git 图形客户端。它专注于一个更具体的问�
 
 ## 开始使用
 
-### 直接运行源码
-
-准备好 Node.js 24+、pnpm 9+ 和 Git 2.23+ 后，在仓库根目录运行：
-
-```powershell
-pnpm install
-pnpm dev
-```
-
-首次打开时，选择一个项目文件夹并点击“开启版本保护”。VibeGit 会在需要时初始化 Git、创建初始保存点；对于已有 Git 项目，它不会创建或切换普通分支。
-
-也可以在 Windows 上双击 [`启动 VibeGit.bat`](启动%20VibeGit.bat) 启动桌面版。
-
 ### 使用 Codex 或 Claude Code 一键部署
 
 在仓库文件夹中，将下面这条指令复制并粘贴给 Codex 或 Claude Code：
@@ -87,6 +74,19 @@ pnpm dist:win
 ```text
 请为我部署 VibeGit Skill。VibeGit 已通过 Windows 安装包安装。请从 https://github.com/lllleolin-max/VibeGit 获取仓库中的 skills/vibegit-change-summary/，先检查其中的 SKILL.md，再复制（不要移动或删除源文件）到已安装 Agent 的全局 Skills 目录：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。仅配置本机已安装的 Agent；如目录不存在请创建，不要覆盖或删除任何其他 Skill。完成后验证两个目标目录中的 SKILL.md 均包含 YAML frontmatter，并告诉我部署结果及是否需要重启 Agent。
 ```
+
+### 直接运行源码
+
+准备好 Node.js 24+、pnpm 9+ 和 Git 2.23+ 后，在仓库根目录运行：
+
+```powershell
+pnpm install
+pnpm dev
+```
+
+首次打开时，选择一个项目文件夹并点击“开启版本保护”。VibeGit 会在需要时初始化 Git、创建初始保存点；对于已有 Git 项目，它不会创建或切换普通分支。
+
+也可以在 Windows 上双击 [`启动 VibeGit.bat`](启动%20VibeGit.bat) 启动桌面版。
 
 ## 安全不是一句口号
 

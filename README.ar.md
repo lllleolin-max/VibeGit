@@ -36,17 +36,6 @@
 
 ## البدء
 
-### التشغيل من المصدر
-
-ثبّت Node.js 24+ وpnpm 9+ وGit 2.23+، ثم شغّل الأوامر من جذر المستودع:
-
-```powershell
-pnpm install
-pnpm dev
-```
-
-عند التشغيل الأول اختر مجلد المشروع ثم اختر **تمكين حماية الإصدارات**. يهيئ VibeGit Git عند الحاجة فقط وينشئ نقطة حفظ أولية، ولا ينشئ أو يبدل الفروع العادية في مشاريع Git الموجودة. في Windows يمكنك أيضاً النقر المزدوج على [`启动 VibeGit.bat`](启动%20VibeGit.bat).
-
 ### النشر بنقرة واحدة عبر Codex أو Claude Code
 
 في مجلد المستودع، انسخ التعليمات التالية والصقها في Codex أو Claude Code:
@@ -73,6 +62,17 @@ pnpm dist:win
 ```text
 انشر VibeGit Skill. تم تثبيت VibeGit عبر مثبّت Windows. اجلب skills/vibegit-change-summary/ من https://github.com/lllleolin-max/VibeGit، وافحص SKILL.md أولاً، ثم انسخه (لا تنقل المصدر أو تحذفه) إلى مجلد Skills العام لكل Agent مثبت: يستخدم Codex المسار %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md، ويستخدم Claude Code المسار %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. اضبط فقط Agents المثبتة على هذا الجهاز، وأنشئ المجلدات المفقودة، ولا تستبدل أو تحذف أي Skill أخرى. عند الانتهاء، تحقق من أن كل SKILL.md في الوجهة يحتوي على YAML frontmatter، وأبلغني بما تم نشره وما إذا كانت إعادة تشغيل Agent مطلوبة.
 ```
+
+### التشغيل من المصدر
+
+ثبّت Node.js 24+ وpnpm 9+ وGit 2.23+، ثم شغّل الأوامر من جذر المستودع:
+
+```powershell
+pnpm install
+pnpm dev
+```
+
+عند التشغيل الأول اختر مجلد المشروع ثم اختر **تمكين حماية الإصدارات**. يهيئ VibeGit Git عند الحاجة فقط وينشئ نقطة حفظ أولية، ولا ينشئ أو يبدل الفروع العادية في مشاريع Git الموجودة. في Windows يمكنك أيضاً النقر المزدوج على [`启动 VibeGit.bat`](启动%20VibeGit.bat).
 
 ## الأمان أولا
 
