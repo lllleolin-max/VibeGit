@@ -45,6 +45,14 @@ pnpm dev
 
 第一次開啟時選擇專案資料夾，按下「開啟版本保護」。VibeGit 只在需要時初始化 Git 並建立初始儲存點；對既有 Git 專案不會建立或切換一般分支。Windows 也可直接雙擊 [`启动 VibeGit.bat`](启动%20VibeGit.bat)。
 
+### 使用 Codex 一鍵部署
+
+在儲存庫資料夾中，將以下指令複製並貼到 Codex：
+
+```text
+請在目前工作區一鍵部署 VibeGit：檢查 Node.js 24+、pnpm 9+ 和 Git 2.23+；若已符合，執行 pnpm install，然後執行 pnpm dev。若缺少依賴，請先說明並安裝。完成後告訴我啟動結果和下一步操作。
+```
+
 ### 建置 Windows 安裝程式
 
 ```powershell
@@ -52,7 +60,7 @@ pnpm install
 pnpm dist:win
 ```
 
-安裝程式會生成於 `release/`。將 `VibeGit-Setup-<version>-x64.exe` 上傳至 GitHub Release 供測試者下載；安裝後會建立桌面與開始功能表捷徑，解除安裝不會刪除 VibeGit 資料。
+安裝程式會生成於 `release/`。你也可以直接[下載最新 Windows 安裝程式](https://github.com/lllleolin-max/VibeGit/releases/latest)，或將 `VibeGit-Setup-<version>-x64.exe` 上傳至 GitHub Release；安裝後會建立桌面與開始功能表捷徑，解除安裝不會刪除 VibeGit 資料。
 
 ## 安全不是一句口號
 
@@ -72,7 +80,7 @@ VibeGit 的原則是：**先保護，再操作。**
 
 ## 目前發布狀態
 
-**v0.1.0 · 可執行原始碼 MVP**
+**v0.1.1 · 含 Windows 安裝程式的可執行原始碼 MVP**
 
 已實作並驗證本機版本保護、儲存點與時間線、Diff、預覽式復原與撤銷、暫時收起、GitHub Private 備份、Electron 桌面介面與統一 Agent Events CLI。Codex 與 Claude Code 自動安裝器屬於後續工作；已附 Hook 範本與驗證邊界。請參閱[最終驗證記錄](docs/FINAL_VALIDATION.md)。
 

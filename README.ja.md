@@ -45,6 +45,14 @@ pnpm dev
 
 初回起動時にプロジェクトフォルダーを選び、「バージョン保護を有効にする」を選択します。必要な場合だけ Git を初期化し、初期保存ポイントを作成します。既存 Git プロジェクトの通常ブランチを作成・切替することはありません。Windows では [`启动 VibeGit.bat`](启动%20VibeGit.bat) をダブルクリックしても起動できます。
 
+### Codex でワンクリックデプロイ
+
+リポジトリフォルダーで、次の指示を Codex にコピー＆ペーストしてください。
+
+```text
+現在のワークスペースに VibeGit をワンクリックでデプロイしてください。Node.js 24+、pnpm 9+、Git 2.23+ を確認し、利用可能なら pnpm install を実行してから pnpm dev を起動してください。不足している依存関係があれば説明して先にインストールし、完了後に起動結果と次の操作を報告してください。
+```
+
 ### Windows インストーラーをビルドする
 
 ```powershell
@@ -52,7 +60,7 @@ pnpm install
 pnpm dist:win
 ```
 
-インストーラーは `release/` に作成されます。`VibeGit-Setup-<version>-x64.exe` を GitHub Release にアップロードしてテスターに配布してください。デスクトップとスタートメニューのショートカットが作成され、アンインストールしてもユーザーの VibeGit データは削除されません。
+インストーラーは `release/` に作成されます。[最新の Windows インストーラーをダウンロード](https://github.com/lllleolin-max/VibeGit/releases/latest)することも、`VibeGit-Setup-<version>-x64.exe` を GitHub Release にアップロードすることもできます。デスクトップとスタートメニューのショートカットが作成され、アンインストールしてもユーザーの VibeGit データは削除されません。
 
 ## 安全性はスローガンではありません
 
@@ -72,7 +80,7 @@ VibeGit の原則は **まず保護し、その後に操作すること**です�
 
 ## リリース状況
 
-**v0.1.0 · 実行可能なソース MVP**
+**v0.1.1 · Windows インストーラー付き実行可能ソース MVP**
 
 ローカル保護、保存ポイントとタイムライン、Diff、プレビュー付き復元と取り消し、一時退避、GitHub Private バックアップ、Electron UI、統一 Agent Events CLI は実装・検証済みです。Codex/Claude Code の自動インストーラーは次段階の作業であり、Hook テンプレートと検証範囲を提供しています。[最終検証記録](docs/FINAL_VALIDATION.md)を確認してください。
 

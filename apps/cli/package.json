@@ -1,6 +1,6 @@
 {
   "name": "@vibegit/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "bin": { "vibegit": "../../dist/cli/index.js" },

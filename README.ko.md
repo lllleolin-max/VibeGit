@@ -45,6 +45,14 @@ pnpm dev
 
 처음 열 때 프로젝트 폴더를 고르고 **버전 보호 활성화**를 선택하세요. 필요한 경우에만 Git을 초기화하고 초기 저장 지점을 만들며, 기존 Git 프로젝트의 일반 브랜치를 만들거나 전환하지 않습니다. Windows에서는 [`启动 VibeGit.bat`](启动%20VibeGit.bat)를 두 번 클릭해도 됩니다.
 
+### Codex로 원클릭 배포
+
+저장소 폴더에서 다음 지시문을 Codex에 복사하여 붙여넣으세요.
+
+```text
+현재 작업 공간에 VibeGit을 원클릭으로 배포하세요. Node.js 24+, pnpm 9+, Git 2.23+가 있는지 확인하고, 사용 가능하면 pnpm install을 실행한 다음 pnpm dev를 시작하세요. 누락된 의존성이 있으면 먼저 설명하고 설치한 뒤, 완료되면 실행 결과와 다음 단계를 알려 주세요.
+```
+
 ### Windows 설치 프로그램 빌드
 
 ```powershell
@@ -52,7 +60,7 @@ pnpm install
 pnpm dist:win
 ```
 
-설치 프로그램은 `release/`에 생성됩니다. `VibeGit-Setup-<version>-x64.exe`를 GitHub Release에 올려 테스터에게 배포하세요. 설치 시 바탕 화면과 시작 메뉴 바로 가기가 생성되며 제거해도 사용자 VibeGit 데이터는 삭제되지 않습니다.
+설치 프로그램은 `release/`에 생성됩니다. [최신 Windows 설치 프로그램을 다운로드](https://github.com/lllleolin-max/VibeGit/releases/latest)하거나 `VibeGit-Setup-<version>-x64.exe`를 GitHub Release에 올려 배포할 수 있습니다. 설치 시 바탕 화면과 시작 메뉴 바로 가기가 생성되며 제거해도 사용자 VibeGit 데이터는 삭제되지 않습니다.
 
 ## 안전은 구호가 아닙니다
 
@@ -72,7 +80,7 @@ VibeGit의 원칙은 **먼저 보호하고, 그다음 작업하는 것**입니�
 
 ## 릴리스 상태
 
-**v0.1.0 · 실행 가능한 소스 MVP**
+**v0.1.1 · Windows 설치 프로그램을 포함한 실행 가능한 소스 MVP**
 
 로컬 버전 보호, 저장 지점과 타임라인, Diff, 미리 보기 복원과 취소, 임시 보관, GitHub Private 백업, Electron UI, 통합 Agent Events CLI는 구현 및 검증되었습니다. Codex/Claude Code 자동 설치 프로그램은 다음 단계이며 Hook 템플릿과 검증 범위를 제공합니다. [최종 검증 기록](docs/FINAL_VALIDATION.md)을 확인하세요.
 
