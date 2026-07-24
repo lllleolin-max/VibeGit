@@ -76,6 +76,16 @@ pnpm dist:win
 
 The installer is created in `release/`. You can [download the latest Windows installer](https://github.com/lllleolin-max/VibeGit/releases/latest) or upload `VibeGit-Setup-<version>-x64.exe` to a GitHub Release. Installation creates desktop and Start Menu shortcuts; uninstalling does not remove the user's VibeGit data.
 
+### Important: installer users must also deploy the VibeGit Skill
+
+> **The installer does not automatically install repository Skills.** If you use VibeGit through the Windows installer, also deploy `vibegit-change-summary`. It lets Codex or Claude Code record a plain-language change summary after a task so VibeGit can show it in the next checkpoint.
+
+Copy the following instruction into Codex or Claude Code. It deploys the Skill only for Agents installed on the machine and preserves all of your existing Skills:
+
+```text
+Deploy the VibeGit Skill for me. VibeGit was installed through the Windows installer. Retrieve skills/vibegit-change-summary/ from https://github.com/lllleolin-max/VibeGit, inspect its SKILL.md, then copy it (do not move or delete the source) to the global Skills directory of each installed Agent: Codex uses %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md and Claude Code uses %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. Configure only Agents installed on this machine; create missing directories; do not overwrite or delete any other Skill. When finished, verify that every destination SKILL.md has YAML frontmatter and report what was deployed and whether an Agent restart is needed.
+```
+
 ## Safety by default
 
 VibeGit's default principle is: **protect first, then act.**

@@ -62,6 +62,16 @@ pnpm dist:win
 
 インストーラーは `release/` に作成されます。[最新の Windows インストーラーをダウンロード](https://github.com/lllleolin-max/VibeGit/releases/latest)することも、`VibeGit-Setup-<version>-x64.exe` を GitHub Release にアップロードすることもできます。デスクトップとスタートメニューのショートカットが作成され、アンインストールしてもユーザーの VibeGit データは削除されません。
 
+### 重要：インストーラー利用時も VibeGit Skill をデプロイ
+
+> **インストーラーはリポジトリ内の Skill を自動インストールしません。** Windows インストーラーで VibeGit を利用する場合は、`vibegit-change-summary` も追加でデプロイしてください。Codex または Claude Code がタスク完了後に分かりやすい変更要約を記録し、VibeGit が次の保存ポイントで表示できるようになります。
+
+次の指示を Codex または Claude Code に貼り付けてください。インストール済みの Agent にだけ Skill をデプロイし、既存の他の Skills は保持します。
+
+```text
+VibeGit Skill をデプロイしてください。VibeGit は Windows インストーラーでインストール済みです。https://github.com/lllleolin-max/VibeGit から skills/vibegit-change-summary/ を取得し、先に SKILL.md を確認してから、コピーしてください（ソースを移動・削除しないでください）。インストール済み Agent のグローバル Skills ディレクトリは、Codex が %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md、Claude Code が %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md です。この端末にインストール済みの Agent だけを設定し、不足するディレクトリは作成してください。他の Skill は上書き・削除しないでください。完了後、各配置先の SKILL.md に YAML frontmatter があることを確認し、デプロイ結果と Agent の再起動が必要かを報告してください。
+```
+
 ## 安全性はスローガンではありません
 
 VibeGit の原則は **まず保護し、その後に操作すること**です。

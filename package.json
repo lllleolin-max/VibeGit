@@ -1,6 +1,6 @@
 {
   "name": "vibegit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A local, reversible project safety net for AI-assisted coding.",
   "main": "out/main/index.js",
   "private": true,
@@ -60,7 +60,8 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
+      "include": "build/installer.nsh",
+      "createDesktopShortcut": false,
       "createStartMenuShortcut": true,
       "shortcutName": "VibeGit",
       "deleteAppDataOnUninstall": false

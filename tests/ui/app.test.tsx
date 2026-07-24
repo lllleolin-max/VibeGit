@@ -89,7 +89,7 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     getSettings: vi.fn(() => success({ dataDirectory: 'C:\\VibeGit', commandTimeoutMs: 20_000 })),
     selectDataDirectory: vi.fn(() => success(null)),
     setDataDirectory: vi.fn((path) => success({ dataDirectory: path, restartRequired: true })),
-    checkEnvironment: vi.fn(() => success({ github: { installed: true, authenticated: false, message: 'ready' }, agents: agentStatus, githubCliInstallAttempted: false, githubCliInstalled: false, message: 'ready' })),
+    checkEnvironment: vi.fn(() => success({ github: { installed: true, authenticated: false, message: 'ready' }, agents: agentStatus, changeSummarySkill: { ready: true, codex: { available: true, installed: true }, claudeCode: { available: false, installed: false }, deploymentCommand: 'Install the VibeGit Change Summary skill.' }, githubCliInstallAttempted: false, githubCliInstalled: false, message: 'ready' })),
   }
   return { ...base, ...overrides }
 }
@@ -212,6 +212,39 @@ describe('VibeGit UI flow', () => {
 
     expect(api.checkEnvironment).toHaveBeenCalledTimes(1)
     expect(await screen.findByText(/GitHub CLI：已就绪/)).toBeInTheDocument()
+  })
+
+  it('prompts for the VibeGit change-summary skill when an installed Agent is missing it', async () => {
+    const api = mockApi({
+      checkEnvironment: vi.fn(() => success({
+        github: { installed: true, authenticated: false, message: 'ready' },
+        agents: {
+          codex: { installed: true, integration: 'template' as const, detail: '已检测' },
+          claudeCode: { installed: false, integration: 'not_configured' as const, detail: '未检测' }
+        },
+        changeSummarySkill: {
+          ready: false,
+          codex: { available: true, installed: false },
+          claudeCode: { available: false, installed: false },
+          deploymentCommand: 'Install the VibeGit Change Summary skill for Codex.'
+        },
+        githubCliInstallAttempted: false,
+        githubCliInstalled: false,
+        message: 'ready'
+      }))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    await user.click(await screen.findByRole('button', { name: '检测配置环境' }))
+
+    expect(api.checkEnvironment).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/待部署|Needs installation/)).toBeInTheDocument()
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('VibeGit Change Summary skill for Codex.')
+    expect(screen.getByRole('button', { name: /英文部署指令|English deployment instruction/ })).toBeInTheDocument()
   })
 
   it('explains that browser compatibility mode cannot select a local folder', async () => {

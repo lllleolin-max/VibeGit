@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { realpath, stat } from 'node:fs/promises'
@@ -11,6 +11,7 @@ import type {
   AppSettings,
   Checkpoint,
   CheckpointDiff,
+  ChangeSummarySkillStatus,
   ConnectRemoteInput,
   CreateCheckpointInput,
   CreatePrivateRepositoryInput,
@@ -39,6 +40,26 @@ export interface VibeGitServiceOptions {
   gitExecutable?: string
   ghExecutable?: string
   commandTimeoutMs?: number
+}
+
+const CHANGE_SUMMARY_SKILL_NAME = 'vibegit-change-summary'
+const CHANGE_SUMMARY_SKILL_SOURCE = 'https://raw.githubusercontent.com/lllleolin-max/VibeGit/main/skills/vibegit-change-summary/SKILL.md'
+const CHANGE_SUMMARY_SKILL_DEPLOYMENT_COMMAND = [
+  'Install the VibeGit Change Summary skill for all relevant agents on this computer.',
+  `Download and inspect ${CHANGE_SUMMARY_SKILL_SOURCE}.`,
+  `For every installed agent, create the matching global file with exactly that content: Codex -> %USERPROFILE%\\.codex\\skills\\${CHANGE_SUMMARY_SKILL_NAME}\\SKILL.md; Claude Code -> %USERPROFILE%\\.claude\\skills\\${CHANGE_SUMMARY_SKILL_NAME}\\SKILL.md.`,
+  'Create missing directories, do not modify or remove any other skill or project file, then verify each created SKILL.md contains its YAML frontmatter.',
+  'Tell me which agents were configured and whether they need to restart.'
+].join(' ')
+
+function installedChangeSummarySkill(path: string): boolean {
+  try {
+    if (!existsSync(path)) return false
+    const content = readFileSync(path, 'utf8').slice(0, 2_048)
+    return content.trimStart().startsWith('---') && content.includes(`name: ${CHANGE_SUMMARY_SKILL_NAME}`)
+  } catch {
+    return false
+  }
 }
 
 function samePath(left: string, right: string): boolean {
@@ -381,6 +402,24 @@ export class VibeGitService {
         integration: claudeInstalled ? 'template' : 'not_configured',
         detail: claudeInstalled ? '检测到 Claude Code；事件 CLI 模板可用' : '未在 PATH 中检测到 Claude Code'
       }
+    }
+  }
+
+  async changeSummarySkillStatus(agents?: AgentConnectionStatus): Promise<ChangeSummarySkillStatus> {
+    const detectedAgents = agents ?? await this.agentStatus()
+    const codex = {
+      available: detectedAgents.codex.installed,
+      installed: installedChangeSummarySkill(join(homedir(), '.codex', 'skills', CHANGE_SUMMARY_SKILL_NAME, 'SKILL.md'))
+    }
+    const claudeCode = {
+      available: detectedAgents.claudeCode.installed,
+      installed: installedChangeSummarySkill(join(homedir(), '.claude', 'skills', CHANGE_SUMMARY_SKILL_NAME, 'SKILL.md'))
+    }
+    return {
+      ready: (!codex.available || codex.installed) && (!claudeCode.available || claudeCode.installed),
+      codex,
+      claudeCode,
+      deploymentCommand: CHANGE_SUMMARY_SKILL_DEPLOYMENT_COMMAND
     }
   }
 

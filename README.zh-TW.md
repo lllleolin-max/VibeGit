@@ -62,6 +62,16 @@ pnpm dist:win
 
 安裝程式會生成於 `release/`。你也可以直接[下載最新 Windows 安裝程式](https://github.com/lllleolin-max/VibeGit/releases/latest)，或將 `VibeGit-Setup-<version>-x64.exe` 上傳至 GitHub Release；安裝後會建立桌面與開始功能表捷徑，解除安裝不會刪除 VibeGit 資料。
 
+### 重要：使用安裝程式時仍需部署 VibeGit Skill
+
+> **安裝程式不會自動安裝儲存庫中的 Skill。** 若你透過 Windows 安裝程式使用 VibeGit，請額外部署 `vibegit-change-summary`；它讓 Codex 或 Claude Code 在任務完成後記錄易讀的變更摘要，供 VibeGit 下一個儲存點顯示。
+
+將以下指令複製給 Codex 或 Claude Code。它只會為已安裝的 Agent 部署 Skill，並保留既有其他 Skills：
+
+```text
+請為我部署 VibeGit Skill。VibeGit 已透過 Windows 安裝程式安裝。請從 https://github.com/lllleolin-max/VibeGit 取得儲存庫中的 skills/vibegit-change-summary/，先檢查其中的 SKILL.md，再複製（不要移動或刪除原始檔）到已安裝 Agent 的全域 Skills 目錄：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。只設定本機已安裝的 Agent；如目錄不存在請建立，不要覆寫或刪除其他任何 Skill。完成後驗證每個目標目錄的 SKILL.md 都包含 YAML frontmatter，並告訴我部署結果及是否需要重新啟動 Agent。
+```
+
 ## 安全不是一句口號
 
 VibeGit 的原則是：**先保護，再操作。**

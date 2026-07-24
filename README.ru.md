@@ -62,6 +62,16 @@ pnpm dist:win
 
 Установщик создаётся в `release/`. Можно [скачать последний установщик Windows](https://github.com/lllleolin-max/VibeGit/releases/latest) или загрузить `VibeGit-Setup-<version>-x64.exe` в GitHub Release для тестировщиков. Будут созданы ярлыки рабочего стола и меню «Пуск»; удаление программы не удалит данные VibeGit пользователя.
 
+### Важно: пользователям установщика нужно также развернуть VibeGit Skill
+
+> **Установщик не устанавливает Skills из репозитория автоматически.** При использовании VibeGit через установщик Windows также разверните `vibegit-change-summary`. Он позволяет Codex или Claude Code после задачи записывать понятное описание изменений, которое VibeGit покажет в следующей точке сохранения.
+
+Скопируйте следующую инструкцию в Codex или Claude Code. Она развернёт Skill только для установленных на компьютере Agent и сохранит все остальные Skills:
+
+```text
+Разверни VibeGit Skill. VibeGit уже установлен через установщик Windows. Получи skills/vibegit-change-summary/ из https://github.com/lllleolin-max/VibeGit, сначала проверь SKILL.md, затем скопируй его (не перемещай и не удаляй исходник) в глобальный каталог Skills каждого установленного Agent: для Codex это %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md, для Claude Code — %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. Настраивай только Agent, установленные на этом компьютере; создай отсутствующие каталоги; не перезаписывай и не удаляй другие Skills. После завершения проверь, что в каждом целевом SKILL.md есть YAML frontmatter, и сообщи, что было развернуто и требуется ли перезапуск Agent.
+```
+
 ## Безопасность по умолчанию
 
 Принцип VibeGit: **сначала защитить, потом действовать.**

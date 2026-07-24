@@ -10,6 +10,7 @@ import {
   Clock3,
   Cloud,
   Code2,
+  Copy,
   FileCode2,
   FilePlus2,
   FolderHeart,
@@ -106,6 +107,16 @@ const UI_TRANSLATIONS: Record<string, TranslationSet> = {
   '选择文件夹': { 'zh-TW': '選擇資料夾', en: 'Choose folder', ja: 'フォルダーを選択', ko: '폴더 선택', ru: 'Выбрать папку', ar: 'اختر مجلداً' },
   '配置环境': { 'zh-TW': '設定環境', en: 'Environment setup', ja: '環境設定', ko: '환경 설정', ru: 'Настройка окружения', ar: 'إعداد البيئة' },
   '检测配置环境': { 'zh-TW': '檢測設定環境', en: 'Check environment', ja: '環境を確認', ko: '환경 확인', ru: 'Проверить окружение', ar: 'فحص البيئة' },
+  'VibeGit 改动说明 Skill：': { 'zh-TW': 'VibeGit 變更說明 Skill：', en: 'VibeGit change-summary skill: ', ja: 'VibeGit 変更要約スキル：', ko: 'VibeGit 변경 요약 Skill: ', ru: 'Навык сводки изменений VibeGit: ', ar: 'مهارة ملخص تغييرات VibeGit: ' },
+  '扫描 GitHub CLI、Codex、Claude Code 和 VibeGit 改动说明 Skill。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。': { 'zh-TW': '掃描 GitHub CLI、Codex、Claude Code 與 VibeGit 變更說明 Skill。缺少 GitHub CLI 時會透過 Windows 套件管理員自動安裝。', en: 'Scan GitHub CLI, Codex, Claude Code, and the VibeGit change-summary skill. GitHub CLI is installed automatically through Windows Package Manager when missing.', ja: 'GitHub CLI、Codex、Claude Code、VibeGit 変更要約スキルを確認します。GitHub CLI が見つからない場合は、Windows パッケージ マネージャーで自動インストールします。', ko: 'GitHub CLI, Codex, Claude Code 및 VibeGit 변경 요약 Skill을 검사합니다. GitHub CLI가 없으면 Windows 패키지 관리자로 자동 설치합니다.', ru: 'Проверяет GitHub CLI, Codex, Claude Code и навык сводки изменений VibeGit. Если GitHub CLI отсутствует, он будет автоматически установлен через диспетчер пакетов Windows.', ar: 'يفحص GitHub CLI وCodex وClaude Code ومهارة ملخص تغييرات VibeGit. عند عدم وجود GitHub CLI، يُثبَّت تلقائياً عبر مدير حزم Windows.' },
+  '没有需要部署的 Agent': { 'zh-TW': '沒有需要部署的 Agent', en: 'No installed Agent needs it', ja: '配置が必要な Agent はありません', ko: '배포가 필요한 설치된 Agent가 없습니다', ru: 'Нет установленного Agent, которому нужен навык', ar: 'لا يوجد وكيل مثبّت يحتاج إلى المهارة' },
+  '已部署': { 'zh-TW': '已部署', en: 'Installed', ja: '導入済み', ko: '설치됨', ru: 'Установлен', ar: 'تم التثبيت' },
+  '待部署': { 'zh-TW': '待部署', en: 'Needs installation', ja: '導入が必要', ko: '설치 필요', ru: 'Требуется установка', ar: 'يتطلب التثبيت' },
+  '未部署 VibeGit 改动说明 Skill': { 'zh-TW': '尚未部署 VibeGit 變更說明 Skill', en: 'VibeGit change-summary skill is not installed', ja: 'VibeGit 変更要約スキルが導入されていません', ko: 'VibeGit 변경 요약 Skill이 설치되지 않았습니다', ru: 'Навык сводки изменений VibeGit не установлен', ar: 'مهارة ملخص تغييرات VibeGit غير مثبتة' },
+  '为了让保存点显示“功能变化”，请把下面英文指令复制给 Codex 或 Claude Code 并发送。它只会为本机已安装的 Agent 创建 VibeGit Skill。': { 'zh-TW': '為了讓儲存點顯示「功能變化」，請將下方英文指令複製給 Codex 或 Claude Code 並傳送。它只會為本機已安裝的 Agent 建立 VibeGit Skill。', en: 'To show feature changes in checkpoints, copy the English instruction below into Codex or Claude Code. It creates the VibeGit skill only for Agents installed on this computer.', ja: '保存ポイントに機能の変更を表示するには、以下の英語の指示を Codex または Claude Code にコピーして送信してください。このコンピューターにインストールされている Agent にのみ VibeGit スキルを作成します。', ko: '저장 지점에 기능 변경을 표시하려면 아래 영어 지시문을 Codex 또는 Claude Code에 복사해 보내세요. 이 컴퓨터에 설치된 Agent에만 VibeGit Skill을 만듭니다.', ru: 'Чтобы показывать изменения функций в точках сохранения, скопируйте английскую инструкцию ниже в Codex или Claude Code. Она создаст навык VibeGit только для Agent, установленных на этом компьютере.', ar: 'لعرض تغييرات الميزات في نقاط الحفظ، انسخ التعليمات الإنجليزية أدناه إلى Codex أو Claude Code. وهي تنشئ مهارة VibeGit للوكلاء المثبتين على هذا الكمبيوتر فقط.' },
+  '检测到至少一个已安装的 Agent 缺少此 Skill；代码变更视图仍可正常使用。': { 'zh-TW': '偵測到至少一個已安裝的 Agent 缺少此 Skill；程式碼變更檢視仍可正常使用。', en: 'At least one installed Agent is missing this skill; the code-change view remains available.', ja: '少なくとも 1 つのインストール済み Agent にこのスキルがありません。コード変更ビューは引き続き利用できます。', ko: '설치된 Agent 중 하나 이상에 이 Skill이 없습니다. 코드 변경 보기는 계속 사용할 수 있습니다.', ru: 'Как минимум у одного установленного Agent нет этого навыка; просмотр изменений кода по-прежнему доступен.', ar: 'يفتقد وكيل مثبّت واحد على الأقل هذه المهارة؛ وتبقى واجهة تغييرات الكود متاحة.' },
+  '复制英文部署指令': { 'zh-TW': '複製英文部署指令', en: 'Copy English deployment instruction', ja: '英語の導入指示をコピー', ko: '영문 배포 지시문 복사', ru: 'Скопировать инструкцию по установке на английском', ar: 'نسخ تعليمات النشر بالإنجليزية' },
+  '已复制': { 'zh-TW': '已複製', en: 'Copied', ja: 'コピーしました', ko: '복사됨', ru: 'Скопировано', ar: 'تم النسخ' },
   'Agent 连接': { 'zh-TW': 'Agent 連線', en: 'Agent connections', ja: 'Agent 接続', ko: 'Agent 연결', ru: 'Подключения Agent', ar: 'اتصالات الوكلاء' },
   '默认安全规则': { 'zh-TW': '預設安全規則', en: 'Default safety rules', ja: '既定の安全ルール', ko: '기본 안전 규칙', ru: 'Правила безопасности по умолчанию', ar: 'قواعد الأمان الافتراضية' },
   'GitHub 私有备份': { 'zh-TW': 'GitHub 私人備份', en: 'GitHub private backup', ja: 'GitHub 非公開バックアップ', ko: 'GitHub 비공개 백업', ru: 'Приватное резервное копирование GitHub', ar: 'نسخ GitHub الاحتياطي الخاص' },
@@ -1158,16 +1169,48 @@ function EnvironmentPreferences(): ReactNode {
   const [result, setResult] = useState<EnvironmentCheckResult>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [skillCommand, setSkillCommand] = useState<string>()
 
   const check = async (): Promise<void> => {
     setBusy(true)
     setError(undefined)
-    try { setResult(unwrap(await window.vibegit.checkEnvironment())) }
+    try {
+      const checked = unwrap(await window.vibegit.checkEnvironment())
+      setResult(checked)
+      setSkillCommand(checked.changeSummarySkill.ready ? undefined : checked.changeSummarySkill.deploymentCommand)
+    }
     catch (value) { setError(errorFrom(value).message) }
     finally { setBusy(false) }
   }
 
-  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><TerminalSquare size={19} /><div><h2>配置环境</h2><p>扫描 GitHub CLI、Codex 和 Claude Code。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。</p></div></div><div className="preferences-action"><div className="environment-result">{result ? <><span className={result.github.installed ? 'status-dot safe' : 'status-dot'} />GitHub CLI：{result.github.installed ? '已就绪' : '未找到'} · Codex：{result.agents.codex.installed ? '已检测' : '未找到'} · Claude Code：{result.agents.claudeCode.installed ? '已检测' : '未找到'}</> : '尚未检测'}</div><button className="button primary small" disabled={busy} onClick={() => void check()}>{busy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}检测配置环境</button></div>{result?.githubCliInstallAttempted && <p className="preferences-notice">{result.githubCliInstalled ? '已自动安装 GitHub CLI；如仍未显示，请重启 VibeGit 后再次检测。' : result.message}</p>}{error && <p className="preferences-notice error">{error}</p>}</div></section>
+  const skillStatus = !result ? undefined : !result.changeSummarySkill.codex.available && !result.changeSummarySkill.claudeCode.available ? '没有需要部署的 Agent' : result.changeSummarySkill.ready ? '已部署' : '待部署'
+  return <><section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><TerminalSquare size={19} /><div><h2>配置环境</h2><p>扫描 GitHub CLI、Codex、Claude Code 和 VibeGit 改动说明 Skill。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。</p></div></div><div className="preferences-action"><div className="environment-result">{result ? <><span><i className={result.github.installed ? 'status-dot safe' : 'status-dot'} />GitHub CLI：{result.github.installed ? '已就绪' : '未找到'} · Codex：{result.agents.codex.installed ? '已检测' : '未找到'} · Claude Code：{result.agents.claudeCode.installed ? '已检测' : '未找到'}</span><span className={result.changeSummarySkill.ready ? 'environment-skill ready' : 'environment-skill missing'}><span>VibeGit 改动说明 Skill：</span>{skillStatus}</span></> : '尚未检测'}</div><button className="button primary small" disabled={busy} onClick={() => void check()}>{busy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}检测配置环境</button></div>{result?.githubCliInstallAttempted && <p className="preferences-notice">{result.githubCliInstalled ? '已自动安装 GitHub CLI；如仍未显示，请重启 VibeGit 后再次检测。' : result.message}</p>}{error && <p className="preferences-notice error">{error}</p>}</div></section>{skillCommand && <SkillDeploymentModal command={skillCommand} onClose={() => setSkillCommand(undefined)} />}</>
+}
+
+function SkillDeploymentModal({ command, onClose }: { command: string; onClose(): void }): ReactNode {
+  const [copied, setCopied] = useState(false)
+  const copy = async (): Promise<void> => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(command)
+      else {
+        const field = document.createElement('textarea')
+        field.value = command
+        field.style.position = 'fixed'
+        field.style.opacity = '0'
+        document.body.append(field)
+        field.select()
+        if (!document.execCommand('copy')) throw new Error('Copy failed')
+        field.remove()
+      }
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return <ModalFrame wide title="未部署 VibeGit 改动说明 Skill" subtitle="为了让保存点显示“功能变化”，请把下面英文指令复制给 Codex 或 Claude Code 并发送。它只会为本机已安装的 Agent 创建 VibeGit Skill。" onClose={onClose}>
+    <div className="skill-deployment-content"><div className="skill-deployment-note"><Sparkles size={18} /><span>检测到至少一个已安装的 Agent 缺少此 Skill；代码变更视图仍可正常使用。</span></div><pre className="skill-deployment-command">{command}</pre><div className="modal-actions"><span className="copy-status" aria-live="polite">{copied ? '已复制' : ''}</span><button className="button ghost" onClick={onClose}>关闭</button><button className="button primary" onClick={() => void copy()}><Copy size={16} />复制英文部署指令</button></div></div>
+  </ModalFrame>
 }
 
 function SettingsView({ onBack }: { onBack(): void }): ReactNode {

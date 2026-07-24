@@ -62,6 +62,16 @@ pnpm dist:win
 
 설치 프로그램은 `release/`에 생성됩니다. [최신 Windows 설치 프로그램을 다운로드](https://github.com/lllleolin-max/VibeGit/releases/latest)하거나 `VibeGit-Setup-<version>-x64.exe`를 GitHub Release에 올려 배포할 수 있습니다. 설치 시 바탕 화면과 시작 메뉴 바로 가기가 생성되며 제거해도 사용자 VibeGit 데이터는 삭제되지 않습니다.
 
+### 중요: 설치 프로그램 사용자는 VibeGit Skill도 배포해야 합니다
+
+> **설치 프로그램은 저장소의 Skill을 자동으로 설치하지 않습니다.** Windows 설치 프로그램으로 VibeGit을 사용한다면 `vibegit-change-summary`도 추가로 배포하세요. Codex 또는 Claude Code가 작업 후 이해하기 쉬운 변경 요약을 기록하여 VibeGit이 다음 저장 지점에 표시할 수 있습니다.
+
+아래 지시문을 Codex 또는 Claude Code에 붙여넣으세요. 이 지시문은 컴퓨터에 설치된 Agent에만 Skill을 배포하며 기존의 다른 Skills는 유지합니다.
+
+```text
+VibeGit Skill을 배포하세요. VibeGit은 Windows 설치 프로그램으로 설치되어 있습니다. https://github.com/lllleolin-max/VibeGit 에서 skills/vibegit-change-summary/를 가져와 먼저 SKILL.md를 확인한 뒤 복사하세요(소스를 이동하거나 삭제하지 마세요). 설치된 Agent의 전역 Skills 디렉터리는 Codex가 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md, Claude Code가 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md입니다. 이 컴퓨터에 설치된 Agent만 설정하고, 없는 디렉터리는 생성하세요. 다른 Skill은 덮어쓰거나 삭제하지 마세요. 완료 후 모든 대상 SKILL.md에 YAML frontmatter가 있는지 검증하고, 배포 결과와 Agent 재시작 필요 여부를 알려 주세요.
+```
+
 ## 안전은 구호가 아닙니다
 
 VibeGit의 원칙은 **먼저 보호하고, 그다음 작업하는 것**입니다.

@@ -242,6 +242,18 @@ export interface DataDirectoryUpdateResult {
   restartRequired: boolean
 }
 
+export interface ChangeSummarySkillAgentStatus {
+  available: boolean
+  installed: boolean
+}
+
+export interface ChangeSummarySkillStatus {
+  ready: boolean
+  codex: ChangeSummarySkillAgentStatus
+  claudeCode: ChangeSummarySkillAgentStatus
+  deploymentCommand: string
+}
+
 export interface RemoveProjectResult {
   projectId: string
   removedCheckpoints: number
@@ -250,6 +262,7 @@ export interface RemoveProjectResult {
 export interface EnvironmentCheckResult {
   github: GitHubCliStatus
   agents: AgentConnectionStatus
+  changeSummarySkill: ChangeSummarySkillStatus
   githubCliInstallAttempted: boolean
   githubCliInstalled: boolean
   message: string

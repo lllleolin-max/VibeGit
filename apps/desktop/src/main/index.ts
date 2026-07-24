@@ -281,9 +281,11 @@ function registerIpc(): void {
       github = await reloadService().githubStatus()
     }
     const agents = await requiredService().agentStatus()
+    const changeSummarySkill = await requiredService().changeSummarySkillStatus(agents)
     return {
       github,
       agents,
+      changeSummarySkill,
       githubCliInstallAttempted,
       githubCliInstalled: githubCliInstallAttempted && github.installed,
       message: github.installed ? 'Environment check completed.' : 'GitHub CLI is not available.'

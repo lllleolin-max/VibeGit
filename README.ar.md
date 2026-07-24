@@ -64,6 +64,16 @@ pnpm dist:win
 
 يُنشأ المثبّت في `release/`. يمكنك [تنزيل أحدث مثبّت Windows](https://github.com/lllleolin-max/VibeGit/releases/latest) أو رفع `VibeGit-Setup-<version>-x64.exe` إلى GitHub Release للمختبرين. ينشئ التثبيت اختصارات سطح المكتب وقائمة «ابدأ»، ولا تحذف إزالة التثبيت بيانات VibeGit الخاصة بالمستخدم.
 
+### مهم: يجب على مستخدمي المثبّت نشر VibeGit Skill أيضاً
+
+> **المثبّت لا يثبّت Skills الموجودة في المستودع تلقائياً.** إذا كنت تستخدم VibeGit عبر مثبّت Windows، فانشر `vibegit-change-summary` أيضاً. فهو يتيح لـ Codex أو Claude Code تسجيل ملخص مبسط للتغييرات بعد المهمة ليعرضه VibeGit في نقطة الحفظ التالية.
+
+انسخ التعليمات التالية إلى Codex أو Claude Code. ستنشر Skill فقط للـ Agents المثبتة على الجهاز وتحافظ على جميع Skills الموجودة لديك:
+
+```text
+انشر VibeGit Skill. تم تثبيت VibeGit عبر مثبّت Windows. اجلب skills/vibegit-change-summary/ من https://github.com/lllleolin-max/VibeGit، وافحص SKILL.md أولاً، ثم انسخه (لا تنقل المصدر أو تحذفه) إلى مجلد Skills العام لكل Agent مثبت: يستخدم Codex المسار %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md، ويستخدم Claude Code المسار %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. اضبط فقط Agents المثبتة على هذا الجهاز، وأنشئ المجلدات المفقودة، ولا تستبدل أو تحذف أي Skill أخرى. عند الانتهاء، تحقق من أن كل SKILL.md في الوجهة يحتوي على YAML frontmatter، وأبلغني بما تم نشره وما إذا كانت إعادة تشغيل Agent مطلوبة.
+```
+
 ## الأمان أولا
 
 مبدأ VibeGit هو: **احمِ أولاً، ثم نفّذ العملية.**
