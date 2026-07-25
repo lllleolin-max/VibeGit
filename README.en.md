@@ -6,12 +6,13 @@
 
 <p align="center">
   <strong>Every AI change, saved and reversible.</strong><br />
-  A local version safety net for Codex, Claude Code, and every Vibe Coder.
+  A local version vault and private GitHub backup for Codex, Claude Code, and every Vibe Coder.
 </p>
 
 <p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="#what-it-does">Core capabilities</a> ·
+  <a href="#sync-to-a-private-github-vault">Private GitHub backup</a> ·
   <a href="#safety-by-default">Safety</a> ·
   <a href="#release-status">Release status</a>
 </p>
@@ -20,19 +21,29 @@
 
 ---
 
-AI can turn an idea into code—and change dozens of files in minutes. The hard question is not whether it can make changes, but: **what changed, and can I safely go back?**
+AI does not only write code; it also takes actions. It can clear files, overwrite working results, or roll a project back to the wrong version—turning a working project into what it was hours ago. The frightening part is not one wrong line of code; it is opening the project after one action and finding that it is suddenly gone.
+
+VibeGit is a local version vault for your project. Save the stages that matter, and even if AI clears, overwrites, or mistakenly rolls back your project, you can see what happened and safely return to a version you confirmed.
 
 VibeGit puts Git behind plain-language actions: add a project, save a version, inspect changes, shelf work, return to an earlier version, and back up to GitHub. You do not need to learn commits, branches, or reset before letting AI move your project forward.
+
+## A familiar late night
+
+At 10 p.m., you finally have the project working. You ask AI to “tidy things up and return to the stable version,” but it makes the wrong move: it clears the current files or rolls the project back to a much older version.
+
+The project suddenly feels unfamiliar. A page you just finished is gone, a fixed issue has returned, and you do not even know where to begin restoring it.
+
+VibeGit does not save a vague memory; it saves the project versions you confirmed. Like a vault, it keeps important checkpoints locally so you can inspect the changes, understand the impact, and safely bring the project back to the version you wanted.
 
 ## What it does
 
 | What you need | What VibeGit does |
 | --- | --- |
-| Verify an AI change | Records checkpoints in a timeline with file lists, change statistics, and line-by-line diffs. |
+| AI cleared, overwrote, or rolled the project back incorrectly | Keeps important versions in isolated checkpoints; review what happened, then safely restore a version you confirmed. |
+| Computer failure, a new machine, or a cleared local project | After one GitHub connection, sync to a dedicated private repository in one click. Recoverable versions remain both locally and in the cloud, without changing your existing `origin`. |
 | Return from a bad version | Creates a safety checkpoint first, previews the impact, and lets you undo the restore. |
 | Put unfinished work aside | Safely shelves current changes and restores them precisely when needed. |
 | Work without Git knowledge | Uses everyday terms such as Project, Checkpoint, and Return to this version. |
-| Back up to GitHub | Creates a private backup without changing your existing `origin`. |
 | Track Codex / Claude Code work | The unified Agent Events CLI can create protection points before and after tasks; hook templates are included. |
 
 ## Built for Vibe Coding
@@ -43,6 +54,16 @@ VibeGit is not another Git GUI. It is for staying informed and in control when A
 - **Reversible:** preview the impact, keep a safety copy automatically, and retain an undo path.
 - **Unobtrusive:** local saving and restoring do not depend on a network connection, GitHub, or an installed Agent.
 - **Defensive:** each project is protected independently; remote backups scan sensitive information and never delete your local files.
+
+## Sync to a private GitHub vault
+
+Local checkpoints help you recover from AI clearing, overwriting, or mistakenly rolling back a project. A private GitHub backup keeps those important versions from living on only one computer.
+
+After connecting GitHub once, sync any stage worth keeping to a dedicated private repository in one click. If a computer fails, you move to a new machine, or the local project directory is accidentally cleared, you still have an independent cloud copy.
+
+VibeGit uses a dedicated `vibegit` remote. It never overwrites, replaces, or rewrites your existing `origin`; your everyday development repository stays exactly as it is while VibeGit adds a layer of private protection for important versions.
+
+After installing [GitHub CLI](https://cli.github.com/), open **GitHub Backup** in a project and choose **Connect GitHub and create an SSH key**. VibeGit completes browser authorisation, creates a dedicated Ed25519 key in its application-data folder, and registers only the public key with GitHub. See [GitHub setup](docs/GITHUB_SETUP.md) for details.
 
 ## Get started
 
@@ -97,12 +118,6 @@ VibeGit's default principle is: **protect first, then act.**
 - The desktop renderer has no Node.js or filesystem access; it can only call allow-listed main-process APIs.
 
 Read the [security design](docs/SECURITY.md) and [architecture](docs/ARCHITECTURE.md) for details.
-
-## Private GitHub backup
-
-After installing [GitHub CLI](https://cli.github.com/), open **GitHub Backup** in a project and choose **Connect GitHub and create an SSH key**. VibeGit completes browser authorisation, creates a dedicated Ed25519 key in its application-data folder, and registers only the public key with GitHub.
-
-Backups use a dedicated `vibegit` remote and never overwrite your existing `origin`. See [GitHub setup](docs/GITHUB_SETUP.md) for details.
 
 ## Release status
 
