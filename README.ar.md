@@ -6,6 +6,12 @@
 
 <p align="center"><strong>كل تغيير يجريه الذكاء الاصطناعي محفوظ وقابل للرجوع.</strong><br />خزنة إصدارات محلية ونسخة GitHub احتياطية خاصة لمستخدمي Codex وClaude Code وكل Vibe Coder.</p>
 
+<p align="center">
+  <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
+  <a href="https://github.com/lllleolin-max/VibeGit/stargazers"><img src="https://img.shields.io/github/stars/lllleolin-max/VibeGit?style=flat&label=stars" alt="GitHub Stars" /></a>
+</p>
+
 <p align="center"><a href="#البدء">البدء</a> · <a href="#ما-الذي-يقدمه">القدرات الأساسية</a> · <a href="#المزامنة-إلى-خزنة-github-خاصة">نسخة GitHub احتياطية خاصة</a> · <a href="#الأمان-أولا">الأمان</a> · <a href="#حالة-الإصدار">حالة الإصدار</a></p>
 
 **اللغات / Languages:** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
@@ -17,6 +23,10 @@
 VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ المراحل المهمة، وحتى لو أفرغ AI المشروع أو استبدله أو أعاده خطأً، يمكنك معرفة ما حدث والعودة بأمان إلى إصدار أكدته.
 
 يضع VibeGit إمكانات Git خلف إجراءات مفهومة: إضافة مشروع، حفظ إصدار، مراجعة التغييرات، وضع العمل جانباً، الرجوع إلى إصدار أقدم، والنسخ الاحتياطي إلى GitHub. لا تحتاج إلى تعلم commit أو branch أو reset قبل أن تدع AI يدفع مشروعك للأمام.
+
+> **Every AI change, saved and reversible.**
+>
+> يستطيع VibeGit استعادة الإصدارات التي حُفظت. فعّل حماية الإصدارات وأنشئ نقطة حفظ أولاً؛ لا يمكن ضمان استعادة التغييرات غير المحفوظة.
 
 ## ليلة متأخرة مألوفة
 
@@ -56,7 +66,7 @@ VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ الم�
 
 ## البدء
 
-### النشر بنقرة واحدة عبر Codex أو Claude Code
+### 1. النشر التلقائي عبر Codex أو Claude Code
 
 في مجلد المستودع، انسخ التعليمات التالية والصقها في Codex أو Claude Code:
 
@@ -64,26 +74,28 @@ VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ الم�
 انشر VibeGit في مساحة العمل الحالية بنقرة واحدة: تحقّق من توفر Node.js 24+ وpnpm 9+ وGit 2.23+؛ إذا كانت متوفرة فنفّذ pnpm install ثم شغّل pnpm dev. إذا كان هناك اعتماد مفقود، اشرحه وثبّته أولاً. بعد الانتهاء أبلغني بنتيجة التشغيل والخطوات التالية.
 ```
 
-### بناء مثبّت Windows
+> تشغّل هذه التعليمات VibeGit من المصدر، وهي مخصصة لمن نزّل المستودع أو استنسخه مسبقاً.
 
-```powershell
-pnpm install
-pnpm dist:win
-```
+### 2. تنزيل مثبّت Windows ونشر VibeGit Skill
 
-يُنشأ المثبّت في `release/`. يمكنك [تنزيل أحدث مثبّت Windows](https://github.com/lllleolin-max/VibeGit/releases/latest) أو رفع `VibeGit-Setup-<version>-x64.exe` إلى GitHub Release للمختبرين. ينشئ التثبيت اختصارات سطح المكتب وقائمة «ابدأ»، ولا تحذف إزالة التثبيت بيانات VibeGit الخاصة بالمستخدم.
+[**تنزيل أحدث مثبّت Windows x64**](https://github.com/lllleolin-max/VibeGit/releases/latest)
 
-### مهم: يجب على مستخدمي المثبّت نشر VibeGit Skill أيضاً
+لا يحتاج المثبّت إلى Node.js أو pnpm. يمكن تشغيل VibeGit من قائمة «ابدأ» بعد التثبيت، ولا تحذف إزالة التثبيت بيانات VibeGit.
 
 > **المثبّت لا يثبّت Skills الموجودة في المستودع تلقائياً.** إذا كنت تستخدم VibeGit عبر مثبّت Windows، فانشر `vibegit-change-summary` أيضاً. فهو يتيح لـ Codex أو Claude Code تسجيل ملخص مبسط للتغييرات بعد المهمة ليعرضه VibeGit في نقطة الحفظ التالية.
 
-انسخ التعليمات التالية إلى Codex أو Claude Code. ستنشر Skill فقط للـ Agents المثبتة على الجهاز وتحافظ على جميع Skills الموجودة لديك:
+<details>
+<summary><strong>انسخ إلى Codex أو Claude Code: انشر VibeGit Skill تلقائياً</strong></summary>
+
+ستنشر Skill فقط للـ Agents المثبتة على الجهاز وتحافظ على جميع Skills الموجودة لديك:
 
 ```text
 انشر VibeGit Skill. تم تثبيت VibeGit عبر مثبّت Windows. اجلب skills/vibegit-change-summary/ من https://github.com/lllleolin-max/VibeGit، وافحص SKILL.md أولاً، ثم انسخه (لا تنقل المصدر أو تحذفه) إلى مجلد Skills العام لكل Agent مثبت: يستخدم Codex المسار %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md، ويستخدم Claude Code المسار %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. اضبط فقط Agents المثبتة على هذا الجهاز، وأنشئ المجلدات المفقودة، ولا تستبدل أو تحذف أي Skill أخرى. عند الانتهاء، تحقق من أن كل SKILL.md في الوجهة يحتوي على YAML frontmatter، وأبلغني بما تم نشره وما إذا كانت إعادة تشغيل Agent مطلوبة.
 ```
 
-### التشغيل من المصدر
+</details>
+
+### 3. التشغيل من المصدر
 
 ثبّت Node.js 24+ وpnpm 9+ وGit 2.23+، ثم شغّل الأوامر من جذر المستودع:
 
@@ -108,15 +120,26 @@ pnpm dev
 
 ## حالة الإصدار
 
-**v0.1.1 · مصدر قابل للتشغيل مع مثبّت Windows**
+**الإصدار المستقر الحالي: [v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · مثبّت Windows x64 ومصدر قابل للتشغيل**
 
-تم تنفيذ والتحقق من حماية الإصدارات المحلية ونقاط الحفظ والخط الزمني وDiff والاستعادة مع المعاينة والتراجع والحفظ المؤقت ونسخ GitHub الخاص وواجهة Electron وAgent Events CLI الموحّد. مثبّتات Codex وClaude Code التلقائية هي الخطوة التالية؛ توجد قوالب Hook وحدود التحقق موثقة. راجع [سجل التحقق النهائي](docs/FINAL_VALIDATION.md).
+تم تنفيذ والتحقق من حماية الإصدارات المحلية ونقاط الحفظ والخط الزمني وDiff والاستعادة مع المعاينة والتراجع والحفظ المؤقت ونسخ GitHub الخاص وواجهة Electron وAgent Events CLI الموحّد. يمكن لـ Codex وClaude Code نشر المصدر بالتعليمات أعلاه؛ أما مثبّتات Agent الأصلية فهي الخطوة التالية. توجد قوالب Hook وحدود التحقق موثقة. راجع [سجل التحقق النهائي](docs/FINAL_VALIDATION.md).
 
 ## الدعم والملاحظات
 
 إذا كان VibeGit مفيداً لك، فنرحب بأن تمنحنا [نجمة على GitHub](https://github.com/lllleolin-max/VibeGit). كما نرحب باقتراحاتك وتجربتك وطلبات الميزات عبر [Issues](https://github.com/lllleolin-max/VibeGit/issues).
 
 ## التطوير والمساهمة
+
+بناء مثبّت Windows:
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+يُنشأ `VibeGit-Setup-<version>-x64.exe` في `release/`.
+
+فحوص المشروع:
 
 ```powershell
 pnpm lint

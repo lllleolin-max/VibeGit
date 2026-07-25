@@ -4,6 +4,12 @@
 
 <p align="center"><strong>Каждое изменение AI сохранено — и его можно отменить.</strong><br />Локальное хранилище версий и приватный бэкап GitHub для Codex, Claude Code и каждого Vibe Coder.</p>
 
+<p align="center">
+  <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
+  <a href="https://github.com/lllleolin-max/VibeGit/stargazers"><img src="https://img.shields.io/github/stars/lllleolin-max/VibeGit?style=flat&label=stars" alt="GitHub Stars" /></a>
+</p>
+
 <p align="center"><a href="#начало-работы">Начало работы</a> · <a href="#возможности">Возможности</a> · <a href="#синхронизация-с-приватным-хранилищем-github">Приватный бэкап GitHub</a> · <a href="#безопасность-по-умолчанию">Безопасность</a> · <a href="#статус-релиза">Статус релиза</a></p>
 
 **Языки / Languages:** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
@@ -15,6 +21,10 @@ AI не только пишет код, но и выполняет действ�
 VibeGit — это локальное хранилище версий вашего проекта. Сохраняйте важные этапы: даже если AI ошибочно очистит, перезапишет или откатит проект, вы увидите, что произошло, и безопасно вернётесь к подтверждённой версии.
 
 VibeGit скрывает Git за понятными действиями: добавить проект, сохранить версию, просмотреть изменения, отложить работу, вернуться к старой версии и сделать резервную копию в GitHub. Не нужно сначала изучать commit, branch или reset.
+
+> **Every AI change, saved and reversible.**
+>
+> VibeGit восстанавливает сохранённые версии. Сначала включите защиту версий и создайте точку сохранения; восстановление несохранённых изменений не гарантируется.
 
 ## Знакомая поздняя ночь
 
@@ -54,7 +64,7 @@ VibeGit использует отдельный remote `vibegit`. Он нико�
 
 ## Начало работы
 
-### Развёртывание одним действием через Codex или Claude Code
+### 1. Автоматическое развёртывание через Codex или Claude Code
 
 В папке репозитория скопируйте и вставьте в Codex или Claude Code следующую инструкцию:
 
@@ -62,26 +72,28 @@ VibeGit использует отдельный remote `vibegit`. Он нико�
 Разверни VibeGit в текущем рабочем пространстве одним действием: проверь наличие Node.js 24+, pnpm 9+ и Git 2.23+; если всё доступно, выполни pnpm install, затем запусти pnpm dev. Если зависимость отсутствует, объясни это и сначала установи её. После завершения сообщи результат запуска и следующие шаги.
 ```
 
-### Сборка установщика Windows
+> Эта инструкция запускает VibeGit из исходного кода и предназначена для тех, кто уже скачал или клонировал репозиторий.
 
-```powershell
-pnpm install
-pnpm dist:win
-```
+### 2. Скачать установщик Windows и развернуть VibeGit Skill
 
-Установщик создаётся в `release/`. Можно [скачать последний установщик Windows](https://github.com/lllleolin-max/VibeGit/releases/latest) или загрузить `VibeGit-Setup-<version>-x64.exe` в GitHub Release для тестировщиков. Будут созданы ярлыки рабочего стола и меню «Пуск»; удаление программы не удалит данные VibeGit пользователя.
+[**Скачать последний установщик Windows x64**](https://github.com/lllleolin-max/VibeGit/releases/latest)
 
-### Важно: пользователям установщика нужно также развернуть VibeGit Skill
+Для установщика не нужны Node.js или pnpm. После установки VibeGit запускается из меню «Пуск»; удаление программы не удаляет данные VibeGit.
 
 > **Установщик не устанавливает Skills из репозитория автоматически.** При использовании VibeGit через установщик Windows также разверните `vibegit-change-summary`. Он позволяет Codex или Claude Code после задачи записывать понятное описание изменений, которое VibeGit покажет в следующей точке сохранения.
 
-Скопируйте следующую инструкцию в Codex или Claude Code. Она развернёт Skill только для установленных на компьютере Agent и сохранит все остальные Skills:
+<details>
+<summary><strong>Скопировать в Codex или Claude Code: автоматически развернуть VibeGit Skill</strong></summary>
+
+Skill будет развёрнут только для установленных на компьютере Agent; остальные Skills сохранятся:
 
 ```text
 Разверни VibeGit Skill. VibeGit уже установлен через установщик Windows. Получи skills/vibegit-change-summary/ из https://github.com/lllleolin-max/VibeGit, сначала проверь SKILL.md, затем скопируй его (не перемещай и не удаляй исходник) в глобальный каталог Skills каждого установленного Agent: для Codex это %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md, для Claude Code — %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. Настраивай только Agent, установленные на этом компьютере; создай отсутствующие каталоги; не перезаписывай и не удаляй другие Skills. После завершения проверь, что в каждом целевом SKILL.md есть YAML frontmatter, и сообщи, что было развернуто и требуется ли перезапуск Agent.
 ```
 
-### Запуск из исходного кода
+</details>
+
+### 3. Запуск из исходного кода
 
 Установите Node.js 24+, pnpm 9+ и Git 2.23+, затем выполните в корне репозитория:
 
@@ -106,15 +118,26 @@ pnpm dev
 
 ## Статус релиза
 
-**v0.1.1 · запускаемый исходный код с установщиком Windows**
+**Текущая стабильная версия: [v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · установщик Windows x64 и запускаемый исходный код**
 
-Реализованы и проверены: локальная защита версий, точки сохранения и таймлайн, Diff, восстановление с предпросмотром и отменой, временное сохранение, Private-бэкап GitHub, Electron UI и единый Agent Events CLI. Автоматические установщики Codex/Claude Code — следующий этап; шаблоны Hook и границы проверки задокументированы. См. [итоговую проверку](docs/FINAL_VALIDATION.md).
+Реализованы и проверены: локальная защита версий, точки сохранения и таймлайн, Diff, восстановление с предпросмотром и отменой, временное сохранение, Private-бэкап GitHub, Electron UI и единый Agent Events CLI. Codex/Claude Code уже могут развернуть исходный код по инструкции выше; нативные установщики Agent — следующий этап. Шаблоны Hook и границы проверки задокументированы. См. [итоговую проверку](docs/FINAL_VALIDATION.md).
 
 ## Поддержка и обратная связь
 
 Если VibeGit вам помог, поставьте [Star на GitHub](https://github.com/lllleolin-max/VibeGit). Мы также будем рады вашим предложениям, впечатлениям и запросам на функции в [Issues](https://github.com/lllleolin-max/VibeGit/issues).
 
 ## Разработка и вклад
+
+Сборка установщика Windows:
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+Файл `VibeGit-Setup-<version>-x64.exe` создаётся в `release/`.
+
+Проверки проекта:
 
 ```powershell
 pnpm lint

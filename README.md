@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=最新版本" alt="最新版本" /></a>
+  <img src="https://img.shields.io/badge/平台-Windows%20x64-0078D4" alt="Windows x64" />
+  <a href="https://github.com/lllleolin-max/VibeGit/stargazers"><img src="https://img.shields.io/github/stars/lllleolin-max/VibeGit?style=flat&label=Stars" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
   <a href="#开始使用">开始使用</a> ·
   <a href="#它能做什么">核心能力</a> ·
   <a href="#一键同步到-github-私有保险库">GitHub 私有备份</a> ·
@@ -28,6 +34,8 @@ VibeGit 就像项目的本地版本保险箱。把重要阶段保存下来后，
 VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、保存版本、查看改动、暂时收起、回到旧版本、备份到 GitHub。你不需要先学会 commit、branch 或 reset，也能放心让 AI 继续推进项目。
 
 > **Every AI change, saved and reversible.**
+>
+> VibeGit 能恢复已经保存的版本。请先开启版本保护并创建保存点；尚未保存的改动无法保证恢复。
 
 ## 一个常见的夜晚
 
@@ -71,7 +79,7 @@ VibeGit 使用专用的 `vibegit` remote，不会覆盖、替换或改写你已�
 
 ## 开始使用
 
-### 使用 Codex 或 Claude Code 一键部署
+### 1. 使用 Codex 或 Claude Code 自动部署
 
 在仓库文件夹中，将下面这条指令复制并粘贴给 Codex 或 Claude Code：
 
@@ -79,26 +87,28 @@ VibeGit 使用专用的 `vibegit` remote，不会覆盖、替换或改写你已�
 请在当前工作区一键部署 VibeGit：检查 Node.js 24+、pnpm 9+ 和 Git 2.23+，如已满足则执行 pnpm install，然后运行 pnpm dev；如果缺少依赖，请先说明并安装。完成后告诉我启动结果和下一步操作。
 ```
 
-### 构建 Windows 安装程序
+> 这条指令会从源码启动 VibeGit，适合已经下载或克隆仓库的用户。
 
-```powershell
-pnpm install
-pnpm dist:win
-```
+### 2. 下载 Windows 安装包，并部署 VibeGit Skill
 
-安装程序会生成在 `release/` 中。用户也可以直接[下载最新 Windows 安装包](https://github.com/lllleolin-max/VibeGit/releases/latest)，发布者可将 `VibeGit-Setup-<version>-x64.exe` 上传至 GitHub Release；安装完成后会创建桌面与开始菜单入口，卸载不会删除用户的 VibeGit 数据。
+[**下载最新 Windows x64 安装包**](https://github.com/lllleolin-max/VibeGit/releases/latest)
 
-### 重要：安装包用户还需要部署 VibeGit Skill
+安装包无需 Node.js 或 pnpm，安装后可从开始菜单启动；卸载不会删除用户的 VibeGit 数据。
 
 > **安装包不会自动安装仓库中的 Skill。** 如果你通过 Windows 安装包使用 VibeGit，请额外部署 `vibegit-change-summary`；它会让 Codex 或 Claude Code 在任务完成后记录易读的改动摘要，供 VibeGit 的下一次保存点显示。
 
-将下面指令复制给 Codex 或 Claude Code。它会只为已安装的 Agent 部署 Skill，并保留你已有的其他 Skills：
+<details>
+<summary><strong>复制给 Codex 或 Claude Code：自动部署 VibeGit Skill</strong></summary>
+
+它只会为本机已安装的 Agent 部署 Skill，并保留已有的其他 Skills：
 
 ```text
 请为我部署 VibeGit Skill。VibeGit 已通过 Windows 安装包安装。请从 https://github.com/lllleolin-max/VibeGit 获取仓库中的 skills/vibegit-change-summary/，先检查其中的 SKILL.md，再复制（不要移动或删除源文件）到已安装 Agent 的全局 Skills 目录：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。仅配置本机已安装的 Agent；如目录不存在请创建，不要覆盖或删除任何其他 Skill。完成后验证两个目标目录中的 SKILL.md 均包含 YAML frontmatter，并告诉我部署结果及是否需要重启 Agent。
 ```
 
-### 直接运行源码
+</details>
+
+### 3. 直接运行源码
 
 准备好 Node.js 24+、pnpm 9+ 和 Git 2.23+ 后，在仓库根目录运行：
 
@@ -125,17 +135,28 @@ VibeGit 的默认立场是：**先保护，再操作。**
 
 ## 当前发布状态
 
-**v0.1.1 · 含 Windows 安装包的可运行源码**
+**当前稳定版本：[v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安装包与可运行源码**
 
 已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
 
-Codex 与 Claude Code 的自动安装器仍在下一阶段；仓库已提供 Hook 模板，并清楚记录了验证范围与外部依赖。查看[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
+Codex 与 Claude Code 目前可通过复制指令完成源码部署；原生自动安装器仍在下一阶段。仓库已提供 Hook 模板，并清楚记录了验证范围与外部依赖。查看[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
 
 ## 支持与反馈
 
 如果 VibeGit 对你有帮助，欢迎在 [GitHub 上给我们一个 Star](https://github.com/lllleolin-max/VibeGit)。也非常期待你通过 [Issues](https://github.com/lllleolin-max/VibeGit/issues) 提出宝贵建议、使用体验或功能需求。
 
 ## 面向开发与贡献
+
+构建 Windows 安装程序：
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+安装程序生成在 `release/` 中，文件名为 `VibeGit-Setup-<version>-x64.exe`。
+
+提交前检查：
 
 ```powershell
 pnpm lint

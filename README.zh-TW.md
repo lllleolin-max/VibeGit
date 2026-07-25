@@ -4,6 +4,12 @@
 
 <p align="center"><strong>讓每一次 AI 修改，都有跡可循、隨時可回。</strong><br />給 Codex、Claude Code 與每一位 Vibe Coder 的本機版本保險箱與 GitHub 私有備份。</p>
 
+<p align="center">
+  <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
+  <a href="https://github.com/lllleolin-max/VibeGit/stargazers"><img src="https://img.shields.io/github/stars/lllleolin-max/VibeGit?style=flat&label=stars" alt="GitHub Stars" /></a>
+</p>
+
 <p align="center"><a href="#開始使用">開始使用</a> · <a href="#它能做什麼">核心能力</a> · <a href="#一鍵同步到-github-私有保險庫">GitHub 私有備份</a> · <a href="#安全不是一句口號">安全設計</a> · <a href="#目前發布狀態">發布狀態</a></p>
 
 **語言 / Languages：** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
@@ -15,6 +21,10 @@ AI 不只會寫程式，也會執行操作：清空檔案、覆蓋目前成果�
 VibeGit 就像專案的本機版本保險箱。把重要階段儲存下來後，即使 AI 誤清空、誤覆蓋或誤回退目前專案，你仍能看清發生了什麼，並安全找回確認過的版本。
 
 VibeGit 將 Git 的能力隱藏在直覺操作後：新增專案、儲存版本、檢視變更、暫時收起、回到舊版本、備份到 GitHub。你不必先學會 commit、branch 或 reset，也能安心讓 AI 推進專案。
+
+> **Every AI change, saved and reversible.**
+>
+> VibeGit 能復原已經儲存的版本。請先開啟版本保護並建立儲存點；尚未儲存的變更無法保證復原。
 
 ## 一個常見的夜晚
 
@@ -54,7 +64,7 @@ VibeGit 使用專用的 `vibegit` remote，不會覆蓋、替換或改寫既有 
 
 ## 開始使用
 
-### 使用 Codex 或 Claude Code 一鍵部署
+### 1. 使用 Codex 或 Claude Code 自動部署
 
 在儲存庫資料夾中，將以下指令複製並貼到 Codex 或 Claude Code：
 
@@ -62,26 +72,28 @@ VibeGit 使用專用的 `vibegit` remote，不會覆蓋、替換或改寫既有 
 請在目前工作區一鍵部署 VibeGit：檢查 Node.js 24+、pnpm 9+ 和 Git 2.23+；若已符合，執行 pnpm install，然後執行 pnpm dev。若缺少依賴，請先說明並安裝。完成後告訴我啟動結果和下一步操作。
 ```
 
-### 建置 Windows 安裝程式
+> 此指令會從原始碼啟動 VibeGit，適合已下載或複製儲存庫的使用者。
 
-```powershell
-pnpm install
-pnpm dist:win
-```
+### 2. 下載 Windows 安裝程式，並部署 VibeGit Skill
 
-安裝程式會生成於 `release/`。你也可以直接[下載最新 Windows 安裝程式](https://github.com/lllleolin-max/VibeGit/releases/latest)，或將 `VibeGit-Setup-<version>-x64.exe` 上傳至 GitHub Release；安裝後會建立桌面與開始功能表捷徑，解除安裝不會刪除 VibeGit 資料。
+[**下載最新 Windows x64 安裝程式**](https://github.com/lllleolin-max/VibeGit/releases/latest)
 
-### 重要：使用安裝程式時仍需部署 VibeGit Skill
+安裝程式不需要 Node.js 或 pnpm。安裝後可從開始功能表啟動；解除安裝不會刪除 VibeGit 資料。
 
 > **安裝程式不會自動安裝儲存庫中的 Skill。** 若你透過 Windows 安裝程式使用 VibeGit，請額外部署 `vibegit-change-summary`；它讓 Codex 或 Claude Code 在任務完成後記錄易讀的變更摘要，供 VibeGit 下一個儲存點顯示。
 
-將以下指令複製給 Codex 或 Claude Code。它只會為已安裝的 Agent 部署 Skill，並保留既有其他 Skills：
+<details>
+<summary><strong>複製給 Codex 或 Claude Code：自動部署 VibeGit Skill</strong></summary>
+
+它只會為已安裝的 Agent 部署 Skill，並保留既有其他 Skills：
 
 ```text
 請為我部署 VibeGit Skill。VibeGit 已透過 Windows 安裝程式安裝。請從 https://github.com/lllleolin-max/VibeGit 取得儲存庫中的 skills/vibegit-change-summary/，先檢查其中的 SKILL.md，再複製（不要移動或刪除原始檔）到已安裝 Agent 的全域 Skills 目錄：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。只設定本機已安裝的 Agent；如目錄不存在請建立，不要覆寫或刪除其他任何 Skill。完成後驗證每個目標目錄的 SKILL.md 都包含 YAML frontmatter，並告訴我部署結果及是否需要重新啟動 Agent。
 ```
 
-### 直接執行原始碼
+</details>
+
+### 3. 直接執行原始碼
 
 安裝 Node.js 24+、pnpm 9+ 與 Git 2.23+ 後，在儲存庫根目錄執行：
 
@@ -106,15 +118,26 @@ VibeGit 的原則是：**先保護，再操作。**
 
 ## 目前發布狀態
 
-**v0.1.1 · 含 Windows 安裝程式的可執行原始碼**
+**目前穩定版本：[v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安裝程式與可執行原始碼**
 
-已實作並驗證本機版本保護、儲存點與時間線、Diff、預覽式復原與撤銷、暫時收起、GitHub Private 備份、Electron 桌面介面與統一 Agent Events CLI。Codex 與 Claude Code 自動安裝器屬於後續工作；已附 Hook 範本與驗證邊界。請參閱[最終驗證記錄](docs/FINAL_VALIDATION.md)。
+已實作並驗證本機版本保護、儲存點與時間線、Diff、預覽式復原與撤銷、暫時收起、GitHub Private 備份、Electron 桌面介面與統一 Agent Events CLI。Codex 與 Claude Code 目前可用上述指令部署原始碼；原生 Agent 自動安裝器屬於後續工作。已附 Hook 範本與驗證邊界。請參閱[最終驗證記錄](docs/FINAL_VALIDATION.md)。
 
 ## 支持與回饋
 
 如果 VibeGit 對你有幫助，歡迎在 [GitHub 給我們一個 Star](https://github.com/lllleolin-max/VibeGit)。也非常期待你透過 [Issues](https://github.com/lllleolin-max/VibeGit/issues) 提出寶貴建議、使用體驗或功能需求。
 
 ## 開發與貢獻
+
+建置 Windows 安裝程式：
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+安裝程式會在 `release/` 中生成為 `VibeGit-Setup-<version>-x64.exe`。
+
+提交前檢查：
 
 ```powershell
 pnpm lint

@@ -10,6 +10,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
+  <a href="https://github.com/lllleolin-max/VibeGit/stargazers"><img src="https://img.shields.io/github/stars/lllleolin-max/VibeGit?style=flat&label=stars" alt="GitHub Stars" /></a>
+</p>
+
+<p align="center">
   <a href="#get-started">Get started</a> ·
   <a href="#what-it-does">Core capabilities</a> ·
   <a href="#sync-to-a-private-github-vault">Private GitHub backup</a> ·
@@ -26,6 +32,10 @@ AI does not only write code; it also takes actions. It can clear files, overwrit
 VibeGit is a local version vault for your project. Save the stages that matter, and even if AI clears, overwrites, or mistakenly rolls back your project, you can see what happened and safely return to a version you confirmed.
 
 VibeGit puts Git behind plain-language actions: add a project, save a version, inspect changes, shelf work, return to an earlier version, and back up to GitHub. You do not need to learn commits, branches, or reset before letting AI move your project forward.
+
+> **Every AI change, saved and reversible.**
+>
+> VibeGit can restore versions that have been saved. Enable version protection and create a checkpoint first; unsaved changes cannot be guaranteed recoverable.
 
 ## A familiar late night
 
@@ -67,7 +77,7 @@ After installing [GitHub CLI](https://cli.github.com/), open **GitHub Backup** i
 
 ## Get started
 
-### One-click deployment with Codex or Claude Code
+### 1. Deploy automatically with Codex or Claude Code
 
 Copy and paste this instruction into Codex or Claude Code from the repository folder:
 
@@ -75,26 +85,28 @@ Copy and paste this instruction into Codex or Claude Code from the repository fo
 Deploy VibeGit in the current workspace: check that Node.js 24+, pnpm 9+, and Git 2.23+ are available; if they are, run pnpm install and then pnpm dev. If a dependency is missing, explain it and install it first. Report the launch result and next steps when finished.
 ```
 
-### Build the Windows installer
+> This launches VibeGit from source and is intended for users who have already downloaded or cloned the repository.
 
-```powershell
-pnpm install
-pnpm dist:win
-```
+### 2. Download the Windows installer and deploy the VibeGit Skill
 
-The installer is created in `release/`. You can [download the latest Windows installer](https://github.com/lllleolin-max/VibeGit/releases/latest) or upload `VibeGit-Setup-<version>-x64.exe` to a GitHub Release. Installation creates desktop and Start Menu shortcuts; uninstalling does not remove the user's VibeGit data.
+[**Download the latest Windows x64 installer**](https://github.com/lllleolin-max/VibeGit/releases/latest)
 
-### Important: installer users must also deploy the VibeGit Skill
+The installer does not require Node.js or pnpm. Launch VibeGit from the Start Menu after installation; uninstalling does not remove your VibeGit data.
 
 > **The installer does not automatically install repository Skills.** If you use VibeGit through the Windows installer, also deploy `vibegit-change-summary`. It lets Codex or Claude Code record a plain-language change summary after a task so VibeGit can show it in the next checkpoint.
 
-Copy the following instruction into Codex or Claude Code. It deploys the Skill only for Agents installed on the machine and preserves all of your existing Skills:
+<details>
+<summary><strong>Copy into Codex or Claude Code: deploy the VibeGit Skill automatically</strong></summary>
+
+This deploys the Skill only for Agents installed on the machine and preserves all existing Skills:
 
 ```text
 Deploy the VibeGit Skill for me. VibeGit was installed through the Windows installer. Retrieve skills/vibegit-change-summary/ from https://github.com/lllleolin-max/VibeGit, inspect its SKILL.md, then copy it (do not move or delete the source) to the global Skills directory of each installed Agent: Codex uses %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md and Claude Code uses %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. Configure only Agents installed on this machine; create missing directories; do not overwrite or delete any other Skill. When finished, verify that every destination SKILL.md has YAML frontmatter and report what was deployed and whether an Agent restart is needed.
 ```
 
-### Run from source
+</details>
+
+### 3. Run from source
 
 Install Node.js 24+, pnpm 9+, and Git 2.23+, then run from the repository root:
 
@@ -121,17 +133,28 @@ Read the [security design](docs/SECURITY.md) and [architecture](docs/ARCHITECTUR
 
 ## Release status
 
-**v0.1.1 · runnable source with Windows installer**
+**Current stable release: [v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 installer and runnable source**
 
 The verified core workflow includes local version protection, checkpoints and timeline, diffs, previewed restore and undo, shelving, private GitHub backup, the Electron desktop UI, and the unified Agent Events CLI.
 
-Automatic installers for Codex and Claude Code are a follow-up. The repository includes hook templates and documents their verification boundaries and external dependencies. See the [final validation record](docs/FINAL_VALIDATION.md) for executed tests and current limitations.
+Codex and Claude Code can deploy the source through the copyable instruction above; native Agent installers remain a follow-up. The repository includes hook templates and documents their verification boundaries and external dependencies. See the [final validation record](docs/FINAL_VALIDATION.md) for executed tests and current limitations.
 
 ## Support and feedback
 
 If VibeGit helps you, please [give us a Star on GitHub](https://github.com/lllleolin-max/VibeGit). We also welcome your suggestions, experience reports, and feature requests through [Issues](https://github.com/lllleolin-max/VibeGit/issues).
 
 ## Development and contribution
+
+Build the Windows installer:
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+The installer is generated in `release/` as `VibeGit-Setup-<version>-x64.exe`.
+
+Run the project checks:
 
 ```powershell
 pnpm lint
