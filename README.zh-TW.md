@@ -4,6 +4,18 @@
 
 <p align="center"><strong>讓每一次 AI 修改，都有跡可循、隨時可回。</strong><br />給 Codex、Claude Code 與每一位 Vibe Coder 的本機版本保險箱與 GitHub 私有備份。</p>
 
+<p align="center"><a href="#開始使用">開始使用</a> · <a href="#它能做什麼">核心能力</a> · <a href="#一鍵同步到-github-私有保險庫">GitHub 私有備份</a> · <a href="#安全不是一句口號">安全設計</a> · <a href="#目前發布狀態">發布狀態</a></p>
+
+**語言 / Languages：** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
+
+---
+
+AI 不只會寫程式，也會執行操作：清空檔案、覆蓋目前成果、回退到錯誤版本，甚至把一個已經跑通的專案變回幾小時前的狀態。真正令人害怕的，不是改錯一行程式，而是一次操作之後，整個專案突然「不見了」。
+
+<p align="center"><img src="assets/branding/vibegit-project-logo.png" alt="VibeGit" width="360" /></p>
+
+<p align="center"><strong>讓每一次 AI 修改，都有跡可循、隨時可回。</strong><br />給 Codex、Claude Code 與每一位 Vibe Coder 的本機版本保險箱與 GitHub 私有備份。</p>
+
 <p align="center">
   <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
@@ -45,12 +57,13 @@ VibeGit 將 Git 的能力隱藏在直覺操作後：新增專案、儲存版本�
 | 不懂 Git 也能使用嗎？ | 可以；介面採用「專案」「儲存點」「回到這個版本」等日常語言。 |
 | 會記錄 Codex / Claude Code 的修改嗎？ | 統一 Agent Events CLI 能在任務前後建立保護點，並附有 Hook 範本。 |
 
-## 為 Vibe Coding 而生
+本機儲存點讓你能從 AI 的誤清空、誤覆蓋或誤回退中找回專案；GitHub 私有備份則讓這些重要版本不只留在一台電腦裡。
 
-- **看得懂：** 使用可讀的儲存點、任務說明與 Diff，不必記住提交雜湊。
-- **回得去：** 先預覽影響、自動留下保險，並保有撤銷能力。
-- **不打擾：** 本機儲存和復原不依賴網路、GitHub 或 Agent 是否已安裝。
-- **守得住：** 每個專案獨立保護；遠端備份先掃描敏感資訊，不會刪除本機檔案。
+連線一次 GitHub 後，在每個值得保留的階段點擊同步，即可把目前版本備份到專屬 Private 儲存庫。電腦損壞、換機或本機專案目錄意外被清空時，你依然擁有一份獨立的雲端保險。
+
+VibeGit 使用專用的 `vibegit` remote，不會覆蓋、替換或改寫既有 `origin`。你的日常開發儲存庫保持原樣，VibeGit 只負責為重要版本增加一層私有備份。
+
+安裝 [GitHub CLI](https://cli.github.com/) 後，在專案頁開啟「GitHub 備份」並點選「連線 GitHub 並建立 SSH 金鑰」。VibeGit 會以瀏覽器授權，在應用程式資料目錄建立專用 Ed25519 金鑰，只將公鑰註冊到 GitHub。詳見 [GitHub 設定說明](docs/GITHUB_SETUP.md)。
 
 ## 一鍵同步到 GitHub 私有保險庫
 
@@ -63,6 +76,33 @@ VibeGit 使用專用的 `vibegit` remote，不會覆蓋、替換或改寫既有 
 安裝 [GitHub CLI](https://cli.github.com/) 後，在專案頁開啟「GitHub 備份」並點選「連線 GitHub 並建立 SSH 金鑰」。VibeGit 會以瀏覽器授權，在應用程式資料目錄建立專用 Ed25519 金鑰，只將公鑰註冊到 GitHub。詳見 [GitHub 設定說明](docs/GITHUB_SETUP.md)。
 
 ## 開始使用
+
+### 使用 Codex 或 Claude Code 一鍵部署
+
+在儲存庫資料夾中，將以下指令複製並貼到 Codex 或 Claude Code：
+
+```text
+請在目前工作區一鍵部署 VibeGit：檢查 Node.js 24+、pnpm 9+ 和 Git 2.23+；若已符合，執行 pnpm install，然後執行 pnpm dev。若缺少依賴，請先說明並安裝。完成後告訴我啟動結果和下一步操作。
+```
+
+### 建置 Windows 安裝程式
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+安裝程式會生成於 `release/`。你也可以直接[下載最新 Windows 安裝程式](https://github.com/lllleolin-max/VibeGit/releases/latest)，或將 `VibeGit-Setup-<version>-x64.exe` 上傳至 GitHub Release；安裝後會建立桌面與開始功能表捷徑，解除安裝不會刪除 VibeGit 資料。
+
+### 重要：使用安裝程式時仍需部署 VibeGit Skill
+
+> **安裝程式不會自動安裝儲存庫中的 Skill。** 若你透過 Windows 安裝程式使用 VibeGit，請額外部署 `vibegit-change-summary`；它讓 Codex 或 Claude Code 在任務完成後記錄易讀的變更摘要，供 VibeGit 下一個儲存點顯示。
+
+將以下指令複製給 Codex 或 Claude Code。它只會為已安裝的 Agent 部署 Skill，並保留既有其他 Skills：
+
+```text
+請為我部署 VibeGit Skill。VibeGit 已透過 Windows 安裝程式安裝。請從 https://github.com/lllleolin-max/VibeGit 取得儲存庫中的 skills/vibegit-change-summary/，先檢查其中的 SKILL.md，再複製（不要移動或刪除原始檔）到已安裝 Agent 的全域 Skills 目錄：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。只設定本機已安裝的 Agent；如目錄不存在請建立，不要覆寫或刪除其他任何 Skill。完成後驗證每個目標目錄的 SKILL.md 都包含 YAML frontmatter，並告訴我部署結果及是否需要重新啟動 Agent。
+```
 
 ### 1. 使用 Codex 或 Claude Code 自動部署
 

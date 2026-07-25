@@ -29,6 +29,12 @@
 
 AI 不只会写代码，也会执行操作：清空文件、覆盖当前成果、回退到错误版本，甚至把一个已经跑通的项目变回几个小时前的状态。真正让人害怕的，不是改错一行代码，而是一次操作之后，整个项目突然“不见了”。
 
+**语言 / Languages：** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
+
+---
+
+AI 不只会写代码，也会执行操作：清空文件、覆盖当前成果、回退到错误版本，甚至把一个已经跑通的项目变回几个小时前的状态。真正让人害怕的，不是改错一行代码，而是一次操作之后，整个项目突然“不见了”。
+
 VibeGit 就像项目的本地版本保险箱。把重要阶段保存下来后，即使 AI 误清空、误覆盖或误回退了当前项目，你仍然能看清发生了什么，并安全找回那个确认过的版本。
 
 VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、保存版本、查看改动、暂时收起、回到旧版本、备份到 GitHub。你不需要先学会 commit、branch 或 reset，也能放心让 AI 继续推进项目。
@@ -45,7 +51,7 @@ VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、�
 
 这时，VibeGit 保存的不是一段模糊的记忆，而是你确认过的项目版本。它像保险箱一样把重要保存点留在本地：查看变化、确认影响，然后把项目安全带回你想要的那个版本。
 
-## 它能做什么
+## 一个常见的夜晚
 
 | 你关心的事 | VibeGit 的做法 |
 | --- | --- |
@@ -56,14 +62,15 @@ VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、�
 | 不懂 Git 也能用吗？ | 可以。界面使用“项目”“保存点”“回到这个版本”等日常语言。 |
 | Codex / Claude Code 改的内容会记录吗？ | 统一 Agent 事件 CLI 可在任务前后创建保护点；已提供 Hook 模板。 |
 
-## 为 Vibe Coding 而生
+本地保存点让你能从 AI 的误清空、误覆盖或误回退中找回项目；GitHub 私有备份，则让这些重要版本不只留在一台电脑里。
 
-VibeGit 不是又一个 Git 图形客户端。它专注于一个更具体的问题：当你把实现工作交给 AI 时，如何始终保有对项目的理解与掌控。
+连接一次 GitHub 后，在每个值得保留的阶段点击同步，即可把当前版本备份到专属的 Private 仓库。电脑损坏、换机，或者本地项目目录意外被清空时，你依然拥有一份独立的云端保险。
 
-- **看得懂**：用可读的保存点、任务说明和 Diff，替代一串难记的提交哈希。
-- **回得去**：回退不是“赌一把”；先预览影响、自动留保险，并保留撤销能力。
-- **不打扰**：本地保存与恢复不依赖网络、GitHub 或 Agent 是否已安装。
-- **守得住**：每个项目独立保护；远程备份前扫描敏感信息，不替你删除本地文件。
+VibeGit 使用专用的 `vibegit` remote，不会覆盖、替换或改写你已有的 `origin`。你的日常开发仓库保持原样，VibeGit 只负责为重要版本增加一层私有备份。
+
+安装 [GitHub CLI](https://cli.github.com/) 后，在项目页打开“GitHub 备份”，点击“连接 GitHub 并创建 SSH 密钥”。VibeGit 会通过浏览器完成授权，并在应用数据目录中创建专用 Ed25519 密钥，只将公钥注册到 GitHub。
+
+详细步骤见 [GitHub 设置说明](docs/GITHUB_SETUP.md)。
 
 ## 一键同步到 GitHub 私有保险库
 
@@ -78,6 +85,33 @@ VibeGit 使用专用的 `vibegit` remote，不会覆盖、替换或改写你已�
 详细步骤见 [GitHub 设置说明](docs/GITHUB_SETUP.md)。
 
 ## 开始使用
+
+### 使用 Codex 或 Claude Code 一键部署
+
+在仓库文件夹中，将下面这条指令复制并粘贴给 Codex 或 Claude Code：
+
+```text
+请在当前工作区一键部署 VibeGit：检查 Node.js 24+、pnpm 9+ 和 Git 2.23+，如已满足则执行 pnpm install，然后运行 pnpm dev；如果缺少依赖，请先说明并安装。完成后告诉我启动结果和下一步操作。
+```
+
+### 构建 Windows 安装程序
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+安装程序会生成在 `release/` 中。用户也可以直接[下载最新 Windows 安装包](https://github.com/lllleolin-max/VibeGit/releases/latest)，发布者可将 `VibeGit-Setup-<version>-x64.exe` 上传至 GitHub Release；安装完成后会创建桌面与开始菜单入口，卸载不会删除用户的 VibeGit 数据。
+
+### 重要：安装包用户还需要部署 VibeGit Skill
+
+> **安装包不会自动安装仓库中的 Skill。** 如果你通过 Windows 安装包使用 VibeGit，请额外部署 `vibegit-change-summary`；它会让 Codex 或 Claude Code 在任务完成后记录易读的改动摘要，供 VibeGit 的下一次保存点显示。
+
+将下面指令复制给 Codex 或 Claude Code。它会只为已安装的 Agent 部署 Skill，并保留你已有的其他 Skills：
+
+```text
+请为我部署 VibeGit Skill。VibeGit 已通过 Windows 安装包安装。请从 https://github.com/lllleolin-max/VibeGit 获取仓库中的 skills/vibegit-change-summary/，先检查其中的 SKILL.md，再复制（不要移动或删除源文件）到已安装 Agent 的全局 Skills 目录：Codex 使用 %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md，Claude Code 使用 %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md。仅配置本机已安装的 Agent；如目录不存在请创建，不要覆盖或删除任何其他 Skill。完成后验证两个目标目录中的 SKILL.md 均包含 YAML frontmatter，并告诉我部署结果及是否需要重启 Agent。
+```
 
 ### 1. 使用 Codex 或 Claude Code 自动部署
 

@@ -29,6 +29,12 @@
 
 AI does not only write code; it also takes actions. It can clear files, overwrite working results, or roll a project back to the wrong version—turning a working project into what it was hours ago. The frightening part is not one wrong line of code; it is opening the project after one action and finding that it is suddenly gone.
 
+**Languages:** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
+
+---
+
+AI does not only write code; it also takes actions. It can clear files, overwrite working results, or roll a project back to the wrong version—turning a working project into what it was hours ago. The frightening part is not one wrong line of code; it is opening the project after one action and finding that it is suddenly gone.
+
 VibeGit is a local version vault for your project. Save the stages that matter, and even if AI clears, overwrites, or mistakenly rolls back your project, you can see what happened and safely return to a version you confirmed.
 
 VibeGit puts Git behind plain-language actions: add a project, save a version, inspect changes, shelf work, return to an earlier version, and back up to GitHub. You do not need to learn commits, branches, or reset before letting AI move your project forward.
@@ -56,14 +62,13 @@ VibeGit does not save a vague memory; it saves the project versions you confirme
 | Work without Git knowledge | Uses everyday terms such as Project, Checkpoint, and Return to this version. |
 | Track Codex / Claude Code work | The unified Agent Events CLI can create protection points before and after tasks; hook templates are included. |
 
-## Built for Vibe Coding
+Local checkpoints help you recover from AI clearing, overwriting, or mistakenly rolling back a project. A private GitHub backup keeps those important versions from living on only one computer.
 
-VibeGit is not another Git GUI. It is for staying informed and in control when AI handles implementation work.
+After connecting GitHub once, sync any stage worth keeping to a dedicated private repository in one click. If a computer fails, you move to a new machine, or the local project directory is accidentally cleared, you still have an independent cloud copy.
 
-- **Understandable:** readable checkpoints, task descriptions, and diffs instead of memorising commit hashes.
-- **Reversible:** preview the impact, keep a safety copy automatically, and retain an undo path.
-- **Unobtrusive:** local saving and restoring do not depend on a network connection, GitHub, or an installed Agent.
-- **Defensive:** each project is protected independently; remote backups scan sensitive information and never delete your local files.
+VibeGit uses a dedicated `vibegit` remote. It never overwrites, replaces, or rewrites your existing `origin`; your everyday development repository stays exactly as it is while VibeGit adds a layer of private protection for important versions.
+
+After installing [GitHub CLI](https://cli.github.com/), open **GitHub Backup** in a project and choose **Connect GitHub and create an SSH key**. VibeGit completes browser authorisation, creates a dedicated Ed25519 key in its application-data folder, and registers only the public key with GitHub. See [GitHub setup](docs/GITHUB_SETUP.md) for details.
 
 ## Sync to a private GitHub vault
 
@@ -76,6 +81,33 @@ VibeGit uses a dedicated `vibegit` remote. It never overwrites, replaces, or rew
 After installing [GitHub CLI](https://cli.github.com/), open **GitHub Backup** in a project and choose **Connect GitHub and create an SSH key**. VibeGit completes browser authorisation, creates a dedicated Ed25519 key in its application-data folder, and registers only the public key with GitHub. See [GitHub setup](docs/GITHUB_SETUP.md) for details.
 
 ## Get started
+
+### One-click deployment with Codex or Claude Code
+
+Copy and paste this instruction into Codex or Claude Code from the repository folder:
+
+```text
+Deploy VibeGit in the current workspace: check that Node.js 24+, pnpm 9+, and Git 2.23+ are available; if they are, run pnpm install and then pnpm dev. If a dependency is missing, explain it and install it first. Report the launch result and next steps when finished.
+```
+
+### Build the Windows installer
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+The installer is created in `release/`. You can [download the latest Windows installer](https://github.com/lllleolin-max/VibeGit/releases/latest) or upload `VibeGit-Setup-<version>-x64.exe` to a GitHub Release. Installation creates desktop and Start Menu shortcuts; uninstalling does not remove the user's VibeGit data.
+
+### Important: installer users must also deploy the VibeGit Skill
+
+> **The installer does not automatically install repository Skills.** If you use VibeGit through the Windows installer, also deploy `vibegit-change-summary`. It lets Codex or Claude Code record a plain-language change summary after a task so VibeGit can show it in the next checkpoint.
+
+Copy the following instruction into Codex or Claude Code. It deploys the Skill only for Agents installed on the machine and preserves all of your existing Skills:
+
+```text
+Deploy the VibeGit Skill for me. VibeGit was installed through the Windows installer. Retrieve skills/vibegit-change-summary/ from https://github.com/lllleolin-max/VibeGit, inspect its SKILL.md, then copy it (do not move or delete the source) to the global Skills directory of each installed Agent: Codex uses %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md and Claude Code uses %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. Configure only Agents installed on this machine; create missing directories; do not overwrite or delete any other Skill. When finished, verify that every destination SKILL.md has YAML frontmatter and report what was deployed and whether an Agent restart is needed.
+```
 
 ### 1. Deploy automatically with Codex or Claude Code
 

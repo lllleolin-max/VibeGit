@@ -6,6 +6,20 @@
 
 <p align="center"><strong>كل تغيير يجريه الذكاء الاصطناعي محفوظ وقابل للرجوع.</strong><br />خزنة إصدارات محلية ونسخة GitHub احتياطية خاصة لمستخدمي Codex وClaude Code وكل Vibe Coder.</p>
 
+<p align="center"><a href="#البدء">البدء</a> · <a href="#ما-الذي-يقدمه">القدرات الأساسية</a> · <a href="#المزامنة-إلى-خزنة-github-خاصة">نسخة GitHub احتياطية خاصة</a> · <a href="#الأمان-أولا">الأمان</a> · <a href="#حالة-الإصدار">حالة الإصدار</a></p>
+
+**اللغات / Languages:** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
+
+---
+
+لا يكتب الذكاء الاصطناعي الكود فقط، بل ينفذ عمليات أيضاً: قد يفرغ الملفات، أو يستبدل النتيجة الحالية، أو يعيد المشروع إلى إصدار خاطئ، فيعيد مشروعاً يعمل إلى حالة كان عليها قبل ساعات. المخيف ليس سطراً خاطئاً في الكود، بل أن يبدو المشروع كله وكأنه اختفى بعد عملية واحدة.
+
+# VibeGit
+
+<p align="center"><img src="assets/branding/vibegit-project-logo.png" alt="VibeGit" width="360" /></p>
+
+<p align="center"><strong>كل تغيير يجريه الذكاء الاصطناعي محفوظ وقابل للرجوع.</strong><br />خزنة إصدارات محلية ونسخة GitHub احتياطية خاصة لمستخدمي Codex وClaude Code وكل Vibe Coder.</p>
+
 <p align="center">
   <a href="https://github.com/lllleolin-max/VibeGit/releases/latest"><img src="https://img.shields.io/github/v/release/lllleolin-max/VibeGit?label=latest" alt="Latest release" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%20x64-0078D4" alt="Windows x64" />
@@ -47,12 +61,13 @@ VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ الم�
 | الاستخدام دون معرفة Git | يستخدم كلمات يومية مثل مشروع ونقطة حفظ والعودة إلى هذا الإصدار. |
 | تسجيل عمل Agent | يستطيع Agent Events CLI الموحّد إنشاء نقاط حماية قبل المهام وبعدها؛ وقوالب Hook مضمّنة. |
 
-## صُمم لـ Vibe Coding
+تساعدك نقاط الحفظ المحلية على استعادة المشروع من تفريغ AI أو استبداله أو إعادته بالخطأ. أما النسخة الاحتياطية الخاصة على GitHub فهي تأمين ثانٍ كي لا تبقى الإصدارات المهمة على جهاز واحد فقط.
 
-- **مفهوم:** نقاط حفظ ووصف مهام وDiff قابلة للقراءة بدلاً من تذكر تجزئات commits.
-- **قابل للرجوع:** معاينة الأثر ونسخة أمان تلقائية ومسار تراجع.
-- **غير مزعج:** الحفظ والاستعادة محليان ولا يعتمدان على الشبكة أو GitHub أو تثبيت Agent.
-- **دفاعي:** يحمي كل مشروع بشكل مستقل ويفحص المعلومات الحساسة قبل النسخ البعيد ولا يحذف ملفاتك المحلية.
+اتصل بـ GitHub مرة واحدة، ثم زامن أي مرحلة مهمة بنقرة واحدة إلى مستودع Private مخصص. إذا تعطل جهازك أو انتقلت إلى جهاز جديد أو أُفرغ مجلد المشروع المحلي بالخطأ، ستبقى لديك نسخة سحابية مستقلة.
+
+يستخدم VibeGit remote مخصصاً باسم `vibegit`. لا يستبدل أو يكتب فوق أو يغير `origin` الموجود لديك؛ يبقى مستودع التطوير اليومي كما هو، ويضيف VibeGit طبقة حماية خاصة للإصدارات المهمة.
+
+بعد تثبيت [GitHub CLI](https://cli.github.com/)، افتح **GitHub Backup** في المشروع واختر الاتصال بـ GitHub وإنشاء مفتاح SSH. يكمل VibeGit التفويض في المتصفح، وينشئ مفتاح Ed25519 مخصصاً في بيانات التطبيق ولا يسجل في GitHub إلا المفتاح العام. التفاصيل في [إعداد GitHub](docs/GITHUB_SETUP.md).
 
 ## المزامنة إلى خزنة GitHub خاصة
 
@@ -65,6 +80,33 @@ VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ الم�
 بعد تثبيت [GitHub CLI](https://cli.github.com/)، افتح **GitHub Backup** في المشروع واختر الاتصال بـ GitHub وإنشاء مفتاح SSH. يكمل VibeGit التفويض في المتصفح، وينشئ مفتاح Ed25519 مخصصاً في بيانات التطبيق ولا يسجل في GitHub إلا المفتاح العام. التفاصيل في [إعداد GitHub](docs/GITHUB_SETUP.md).
 
 ## البدء
+
+### النشر بنقرة واحدة عبر Codex أو Claude Code
+
+في مجلد المستودع، انسخ التعليمات التالية والصقها في Codex أو Claude Code:
+
+```text
+انشر VibeGit في مساحة العمل الحالية بنقرة واحدة: تحقّق من توفر Node.js 24+ وpnpm 9+ وGit 2.23+؛ إذا كانت متوفرة فنفّذ pnpm install ثم شغّل pnpm dev. إذا كان هناك اعتماد مفقود، اشرحه وثبّته أولاً. بعد الانتهاء أبلغني بنتيجة التشغيل والخطوات التالية.
+```
+
+### بناء مثبّت Windows
+
+```powershell
+pnpm install
+pnpm dist:win
+```
+
+يُنشأ المثبّت في `release/`. يمكنك [تنزيل أحدث مثبّت Windows](https://github.com/lllleolin-max/VibeGit/releases/latest) أو رفع `VibeGit-Setup-<version>-x64.exe` إلى GitHub Release للمختبرين. ينشئ التثبيت اختصارات سطح المكتب وقائمة «ابدأ»، ولا تحذف إزالة التثبيت بيانات VibeGit الخاصة بالمستخدم.
+
+### مهم: يجب على مستخدمي المثبّت نشر VibeGit Skill أيضاً
+
+> **المثبّت لا يثبّت Skills الموجودة في المستودع تلقائياً.** إذا كنت تستخدم VibeGit عبر مثبّت Windows، فانشر `vibegit-change-summary` أيضاً. فهو يتيح لـ Codex أو Claude Code تسجيل ملخص مبسط للتغييرات بعد المهمة ليعرضه VibeGit في نقطة الحفظ التالية.
+
+انسخ التعليمات التالية إلى Codex أو Claude Code. ستنشر Skill فقط للـ Agents المثبتة على الجهاز وتحافظ على جميع Skills الموجودة لديك:
+
+```text
+انشر VibeGit Skill. تم تثبيت VibeGit عبر مثبّت Windows. اجلب skills/vibegit-change-summary/ من https://github.com/lllleolin-max/VibeGit، وافحص SKILL.md أولاً، ثم انسخه (لا تنقل المصدر أو تحذفه) إلى مجلد Skills العام لكل Agent مثبت: يستخدم Codex المسار %USERPROFILE%\.codex\skills\vibegit-change-summary\SKILL.md، ويستخدم Claude Code المسار %USERPROFILE%\.claude\skills\vibegit-change-summary\SKILL.md. اضبط فقط Agents المثبتة على هذا الجهاز، وأنشئ المجلدات المفقودة، ولا تستبدل أو تحذف أي Skill أخرى. عند الانتهاء، تحقق من أن كل SKILL.md في الوجهة يحتوي على YAML frontmatter، وأبلغني بما تم نشره وما إذا كانت إعادة تشغيل Agent مطلوبة.
+```
 
 ### 1. النشر التلقائي عبر Codex أو Claude Code
 
