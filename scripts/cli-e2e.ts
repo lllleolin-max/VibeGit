@@ -24,16 +24,17 @@ function runEvent(event: Record<string, unknown>): Record<string, unknown> {
   return JSON.parse(result.stdout) as Record<string, unknown>
 }
 
-function runHook(payload: Record<string, unknown>): void {
+function runHook(payload: Record<string, unknown>): Record<string, unknown> {
   const result = spawnSync(process.execPath, [cliPath, 'hook', 'codex', '--stdin'], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     env: { ...process.env, VIBEGIT_DATA_DIR: dataDirectory },
     maxBuffer: 4 * 1024 * 1024
   })
-  if (result.status !== 0 || result.stdout.trim() !== '{}') {
+  if (result.status !== 0) {
     throw new Error(result.stderr || result.stdout || 'CLI hook failed')
   }
+  return JSON.parse(result.stdout) as Record<string, unknown>
 }
 
 const seed = new VibeGitService({ dataDirectory })
@@ -42,13 +43,16 @@ await seed.initializeProtection(project.id)
 seed.close()
 
 try {
-  runHook({
+  const startHook = runHook({
     hook_event_name: 'UserPromptSubmit',
     cwd: nestedProjectPath,
     session_id: 'nested-hook-session',
     turn_id: 'nested-hook-turn',
     prompt: '从子目录启动的 Codex Hook'
   })
+  if (!(startHook.hookSpecificOutput as Record<string, unknown> | undefined)?.additionalContext) {
+    throw new Error('Protected Hook did not inject VibeGit summary context')
+  }
   const started = runEvent({
     event: 'task-start',
     agent: 'codex',
@@ -58,6 +62,15 @@ try {
     timestamp: new Date().toISOString()
   })
   await writeFile(join(projectPath, 'app.txt'), 'after\nnew feature\n', 'utf8')
+  const stopHook = runHook({
+    hook_event_name: 'Stop',
+    cwd: projectPath,
+    session_id: 'nested-hook-session',
+    turn_id: 'nested-hook-stop'
+  })
+  if (stopHook.decision !== 'block') {
+    throw new Error('Protected Hook did not require a missing VibeGit summary')
+  }
   const ended = runEvent({
     event: 'task-end',
     agent: 'codex',
@@ -80,6 +93,7 @@ try {
       startOk: started.ok === true,
       endOk: ended.ok === true,
       nestedHook: 'passed',
+      stopSummaryGuard: 'passed',
       checkpointTypes: checkpoints.map((checkpoint) => checkpoint.type),
       postAgentFiles: postAgent.changedFiles.map((file) => file.path)
     })}\n`)

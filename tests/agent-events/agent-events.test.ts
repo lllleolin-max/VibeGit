@@ -72,6 +72,57 @@ describe('Agent events', () => {
     })
   })
 
+  it('asks a Hook-managed Agent for a summary before the first task end, then uses a transparent fallback', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    await sandbox.service.initializeProtection(project.id)
+    await sandbox.service.handleAgentEvent({
+      event: 'task-start', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'enforced-summary', timestamp: new Date().toISOString()
+    }, { enforceSummary: true })
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 2\n')
+
+    const firstStop = await sandbox.service.handleAgentEvent({
+      event: 'task-end', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'enforced-summary', eventId: 'stop-1', timestamp: new Date().toISOString()
+    }, { enforceSummary: true })
+    expect(firstStop).toMatchObject({ changed: false, summaryRequired: true })
+    expect(sandbox.service.listCheckpoints(project.id).filter((item) => item.type === 'post_agent')).toHaveLength(0)
+
+    const fallback = await sandbox.service.handleAgentEvent({
+      event: 'task-end', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'enforced-summary', eventId: 'stop-2', stopHookActive: true, timestamp: new Date().toISOString()
+    }, { enforceSummary: true })
+    expect(fallback.checkpoint?.metadata).toMatchObject({ featureSummarySource: 'auto-generated' })
+    expect(fallback.checkpoint?.summary).toContain('automatically recorded')
+  })
+
+  it('does not attach a summary from a different Agent session', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    await sandbox.service.initializeProtection(project.id)
+    await sandbox.service.handleAgentEvent({
+      event: 'task-start', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'current-session', timestamp: new Date().toISOString()
+    })
+    await sandbox.service.recordAgentSummary({
+      projectPath: sandbox.projectPath,
+      agent: 'codex',
+      sessionId: 'old-session',
+      summary: { overview: 'Old session summary', added: [], improved: [], removed: [] }
+    })
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 2\n')
+
+    const ended = await sandbox.service.handleAgentEvent({
+      event: 'task-end', agent: 'codex', projectPath: sandbox.projectPath,
+      sessionId: 'current-session', timestamp: new Date().toISOString()
+    })
+    expect(ended.checkpoint?.metadata).toMatchObject({ featureSummarySource: 'auto-generated' })
+    expect(ended.checkpoint?.summary).not.toContain('Old session summary')
+  })
+
   it('removes only VibeGit records when a protected project is removed', async () => {
     sandbox = await createSandbox()
     await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
@@ -113,7 +164,8 @@ describe('Agent events', () => {
     expect(stopped.event.success).toBeUndefined()
     expect(stopped.event.message).toContain('任务状态未知')
     expect(stopped.checkpoint?.metadata).not.toHaveProperty('success')
-    expect(stopped.checkpoint?.summary).toContain('成功状态未知')
+    expect(stopped.checkpoint?.metadata).toMatchObject({ featureSummarySource: 'auto-generated' })
+    expect(stopped.checkpoint?.summary).toContain('automatically recorded')
   })
 
   it('atomically deduplicates concurrent Hook retries across service instances', async () => {

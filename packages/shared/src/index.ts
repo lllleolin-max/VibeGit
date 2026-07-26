@@ -151,6 +151,7 @@ export interface AgentEvent {
   timestamp: string
   success?: boolean
   testStatus?: TestStatus
+  stopHookActive?: boolean
 }
 
 export interface FeatureChangeSummary {
@@ -394,6 +395,8 @@ export const IPC_CHANNELS = {
   initializeProtection: 'projects:initialize-protection',
   listCheckpoints: 'checkpoints:list',
   createCheckpoint: 'checkpoints:create',
+  renameCheckpoint: 'checkpoints:rename',
+  deleteCheckpoint: 'checkpoints:delete',
   getCheckpointDiff: 'checkpoints:diff',
   prepareRestore: 'restore:prepare',
   executeRestore: 'restore:execute',
@@ -423,8 +426,16 @@ export const IPC_CHANNELS = {
 } as const
 
 export interface AgentConnectionStatus {
-  codex: { installed: boolean; integration: 'available' | 'template' | 'not_configured'; detail: string }
-  claudeCode: { installed: boolean; integration: 'available' | 'template' | 'not_configured'; detail: string }
+  codex: AgentInstallationStatus
+  claudeCode: AgentInstallationStatus
+}
+
+export interface AgentInstallationStatus {
+  installed: boolean
+  integration: 'available' | 'template' | 'not_configured'
+  detail: string
+  detection: 'path' | 'known-location' | 'volume-scan' | 'not-found'
+  location?: string
 }
 
 export interface VibeGitApi {
@@ -437,6 +448,8 @@ export interface VibeGitApi {
   initializeProtection(projectId: string): Promise<ApiResult<{ project: Project; checkpoint: Checkpoint }>>
   listCheckpoints(projectId: string): Promise<ApiResult<Checkpoint[]>>
   createCheckpoint(input: CreateCheckpointInput): Promise<ApiResult<Checkpoint>>
+  renameCheckpoint(checkpointId: string, title: string): Promise<ApiResult<Checkpoint>>
+  deleteCheckpoint(checkpointId: string): Promise<ApiResult<{ checkpointId: string; projectId: string }>>
   getCheckpointDiff(checkpointId: string): Promise<ApiResult<CheckpointDiff>>
   prepareRestore(projectId: string, checkpointId: string): Promise<ApiResult<RestorePreview>>
   executeRestore(token: string): Promise<ApiResult<RestoreRecord>>
@@ -531,6 +544,7 @@ export function parseAgentEvent(input: unknown): AgentEvent {
     ...(typeof record.eventId === 'string' && record.eventId.length <= 500 ? { eventId: record.eventId } : {}),
     ...(typeof record.taskText === 'string' ? { taskText: record.taskText } : {}),
     ...(typeof record.success === 'boolean' ? { success: record.success } : {}),
+    ...(typeof record.stopHookActive === 'boolean' ? { stopHookActive: record.stopHookActive } : {}),
     ...(record.testStatus === 'passed' || record.testStatus === 'failed' || record.testStatus === 'not_run' || record.testStatus === 'unknown'
       ? { testStatus: record.testStatus }
       : {})

@@ -158,7 +158,7 @@ VibeGit の原則は **まず保護し、その後に操作すること**です�
 
 ## リリース状況
 
-**現在の安定版：[v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 インストーラーと実行可能ソース**
+**現在の安定版：[v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 インストーラーと実行可能ソース**
 
 ローカル保護、保存ポイントとタイムライン、Diff、プレビュー付き復元と取り消し、一時退避、GitHub Private バックアップ、Electron UI、統一 Agent Events CLI は実装・検証済みです。Codex/Claude Code は上記の指示でソースをデプロイできます。ネイティブ Agent 自動インストーラーは次段階の作業です。Hook テンプレートと検証範囲も提供しています。[最終検証記録](docs/FINAL_VALIDATION.md)を確認してください。
 

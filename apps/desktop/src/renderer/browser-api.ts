@@ -38,6 +38,8 @@ if (!browserWindow.vibegit) {
     initializeProtection: (projectId) => invoke('initializeProtection', [projectId]),
     listCheckpoints: (projectId) => invoke('listCheckpoints', [projectId]),
     createCheckpoint: (input) => invoke('createCheckpoint', [input]),
+    renameCheckpoint: (checkpointId, title) => invoke('renameCheckpoint', [checkpointId, title]),
+    deleteCheckpoint: (checkpointId) => invoke('deleteCheckpoint', [checkpointId]),
     getCheckpointDiff: (checkpointId) => invoke('getCheckpointDiff', [checkpointId]),
     prepareRestore: (projectId, checkpointId) => invoke('prepareRestore', [projectId, checkpointId]),
     executeRestore: (token) => invoke('executeRestore', [token]),

@@ -158,7 +158,7 @@ VibeGit 的原則是：**先保護，再操作。**
 
 ## 目前發布狀態
 
-**目前穩定版本：[v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安裝程式與可執行原始碼**
+**目前穩定版本：[v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安裝程式與可執行原始碼**
 
 已實作並驗證本機版本保護、儲存點與時間線、Diff、預覽式復原與撤銷、暫時收起、GitHub Private 備份、Electron 桌面介面與統一 Agent Events CLI。Codex 與 Claude Code 目前可用上述指令部署原始碼；原生 Agent 自動安裝器屬於後續工作。已附 Hook 範本與驗證邊界。請參閱[最終驗證記錄](docs/FINAL_VALIDATION.md)。
 

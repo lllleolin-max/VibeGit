@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
-import { realpath, stat } from 'node:fs/promises'
+import { basename, delimiter, join, resolve } from 'node:path'
+import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import type {
   AddProjectInput,
   AgentConnectionStatus,
@@ -43,20 +43,77 @@ export interface VibeGitServiceOptions {
 }
 
 const CHANGE_SUMMARY_SKILL_NAME = 'vibegit-change-summary'
+const CHANGE_SUMMARY_SKILL_VERSION = '2'
 const CHANGE_SUMMARY_SKILL_SOURCE = 'https://raw.githubusercontent.com/lllleolin-max/VibeGit/main/skills/vibegit-change-summary/SKILL.md'
 const CHANGE_SUMMARY_SKILL_DEPLOYMENT_COMMAND = [
-  'Install the VibeGit Change Summary skill for all relevant agents on this computer.',
+  'Install or upgrade the VibeGit Change Summary skill for all relevant agents on this computer.',
   `Download and inspect ${CHANGE_SUMMARY_SKILL_SOURCE}.`,
   `For every installed agent, create the matching global file with exactly that content: Codex -> %USERPROFILE%\\.codex\\skills\\${CHANGE_SUMMARY_SKILL_NAME}\\SKILL.md; Claude Code -> %USERPROFILE%\\.claude\\skills\\${CHANGE_SUMMARY_SKILL_NAME}\\SKILL.md.`,
   'Create missing directories, do not modify or remove any other skill or project file, then verify each created SKILL.md contains its YAML frontmatter.',
-  'Tell me which agents were configured and whether they need to restart.'
+  `Verify that the installed skill declares vibegit-skill-version: ${CHANGE_SUMMARY_SKILL_VERSION}. Tell me which agents were configured and whether they need to restart.`
 ].join(' ')
+
+const PROTECTION_MARKER_FILE = 'protected.json'
+const PROTECTION_MARKER_PATH = '.git/vibegit/protected.json'
 
 function installedChangeSummarySkill(path: string): boolean {
   try {
     if (!existsSync(path)) return false
     const content = readFileSync(path, 'utf8').slice(0, 2_048)
-    return content.trimStart().startsWith('---') && content.includes(`name: ${CHANGE_SUMMARY_SKILL_NAME}`)
+    return content.trimStart().startsWith('---')
+      && content.includes(`name: ${CHANGE_SUMMARY_SKILL_NAME}`)
+      && content.includes(`vibegit-skill-version: ${CHANGE_SUMMARY_SKILL_VERSION}`)
+  } catch {
+    return false
+  }
+}
+
+async function readOptionalText(path: string): Promise<string | undefined> {
+  try {
+    return await readFile(path, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+}
+
+async function ensureProjectProtectionMarker(git: GitEngine, projectPath: string): Promise<void> {
+  const markerDirectory = await git.getPrivateDataDirectory(projectPath)
+  const markerPath = join(markerDirectory, PROTECTION_MARKER_FILE)
+  const marker = {
+    schemaVersion: 1,
+    enabled: true,
+    summarySkill: CHANGE_SUMMARY_SKILL_NAME
+  }
+  const existingMarker = await readOptionalText(markerPath)
+  if (existingMarker) {
+    try {
+      const parsed = JSON.parse(existingMarker) as Record<string, unknown>
+      if (parsed.schemaVersion !== 1 || parsed.summarySkill !== CHANGE_SUMMARY_SKILL_NAME) {
+        throw new VibeGitError('VIBEGIT_MARKER_CONFLICT', `VibeGit protection marker conflicts with an existing file: ${PROTECTION_MARKER_PATH}`, {
+          detail: markerPath,
+          remediation: 'Remove the conflicting VibeGit marker, then enable protection again.'
+        })
+      }
+    } catch (error) {
+      if (error instanceof VibeGitError) throw error
+      throw new VibeGitError('VIBEGIT_MARKER_CONFLICT', `VibeGit protection marker is not valid JSON: ${PROTECTION_MARKER_PATH}`, {
+        detail: markerPath,
+        remediation: 'Remove the invalid VibeGit marker, then enable protection again.',
+        cause: error
+      })
+    }
+  }
+  if (existingMarker !== `${JSON.stringify(marker, null, 2)}\n`) await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+}
+
+async function hasProjectProtectionMarker(git: GitEngine, projectPath: string): Promise<boolean> {
+  try {
+    const markerPath = join(await git.getPrivateDataDirectory(projectPath), PROTECTION_MARKER_FILE)
+    const content = await readOptionalText(markerPath)
+    if (!content) return false
+    const marker = JSON.parse(content) as Record<string, unknown>
+    return marker.schemaVersion === 1 && marker.enabled === true && marker.summarySkill === CHANGE_SUMMARY_SKILL_NAME
   } catch {
     return false
   }
@@ -86,29 +143,121 @@ function bundledGitHubCliExecutable(): string | undefined {
   return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
 }
 
-async function executableOnPath(name: string): Promise<boolean> {
-  const locator = process.platform === 'win32' ? 'where.exe' : 'which'
-  return await new Promise<boolean>((resolvePromise) => {
-    const child = spawn(locator, [name], { shell: false, windowsHide: true, stdio: 'ignore' })
-    child.on('error', () => resolvePromise(false))
-    child.on('close', (code) => resolvePromise(code === 0))
+type AgentExecutableName = 'codex' | 'claude'
+type AgentDiscoverySource = 'path' | 'known-location' | 'volume-scan' | 'not-found'
+
+interface AgentExecutableDiscovery {
+  location?: string
+  source: AgentDiscoverySource
+}
+
+function agentExecutableFileNames(name: AgentExecutableName): string[] {
+  return process.platform === 'win32'
+    ? [`${name}.cmd`, `${name}.exe`, `${name}.bat`, name]
+    : [name]
+}
+
+async function runLocator(executable: string, args: string[], timeoutMs: number): Promise<{ stdout: string; exitCode: number | null }> {
+  return await new Promise((resolvePromise) => {
+    const child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    child.stdout?.on('data', (chunk: Buffer | string) => { stdout += chunk.toString() })
+    const timer = setTimeout(() => {
+      try { child.kill() } catch { /* The process has already exited. */ }
+    }, timeoutMs)
+    child.on('error', () => {
+      clearTimeout(timer)
+      resolvePromise({ stdout: '', exitCode: null })
+    })
+    child.on('close', (code) => {
+      clearTimeout(timer)
+      resolvePromise({ stdout, exitCode: code })
+    })
   })
 }
 
-function knownAgentExecutable(name: 'codex' | 'claude'): string | undefined {
-  if (process.platform !== 'win32') return undefined
-  const candidates = [
-    process.env.APPDATA ? join(process.env.APPDATA, 'npm', `${name}.cmd`) : undefined,
-    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'npm', `${name}.cmd`) : undefined,
-    join(homedir(), '.local', 'bin', `${name}.exe`),
-    join(homedir(), '.local', 'bin', `${name}.cmd`),
-    join(homedir(), '.local', 'bin', name)
-  ]
-  return candidates.find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)))
+function existingExecutable(candidates: Iterable<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (candidate && existsSync(candidate)) return candidate
+  }
+  return undefined
 }
 
-async function agentExecutableAvailable(name: 'codex' | 'claude'): Promise<boolean> {
-  return await executableOnPath(name) || Boolean(knownAgentExecutable(name))
+function existingAgentExecutable(name: AgentExecutableName, candidates: Iterable<string | undefined>): string | undefined {
+  const allowedNames = new Set(agentExecutableFileNames(name).map((fileName) => fileName.toLowerCase()))
+  return existingExecutable(Array.from(candidates).filter((candidate) => candidate && allowedNames.has(basename(candidate).toLowerCase())))
+}
+
+async function executableOnPath(name: AgentExecutableName): Promise<string | undefined> {
+  const locator = process.platform === 'win32' ? 'where.exe' : 'which'
+  const result = await runLocator(locator, [name], 2_500)
+  if (result.exitCode !== 0) return undefined
+  return existingAgentExecutable(name, result.stdout.split(/\r?\n/).map((line) => line.trim()))
+}
+
+async function windowsUserPathDirectories(): Promise<string[]> {
+  if (process.platform !== 'win32') return []
+  const queries = [
+    ['query', 'HKCU\\Environment', '/v', 'Path'],
+    ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment', '/v', 'Path']
+  ]
+  const outputs = await Promise.all(queries.map((args) => runLocator('reg.exe', args, 2_000)))
+  return outputs.flatMap((output) => output.stdout.split(/\r?\n/)
+    .map((line) => line.match(/^\s*Path\s+REG_\w+\s+(.+)$/i)?.[1])
+    .filter((value): value is string => Boolean(value))
+    .flatMap((value) => value.split(';')))
+}
+
+async function knownAgentExecutable(name: AgentExecutableName): Promise<string | undefined> {
+  const fileNames = agentExecutableFileNames(name)
+  const pathDirectories = [
+    ...(process.env.PATH?.split(delimiter) ?? []),
+    ...(await windowsUserPathDirectories())
+  ]
+  const candidates = [
+    ...pathDirectories.flatMap((directory) => fileNames.map((fileName) => join(directory, fileName))),
+    ...[
+      process.env.APPDATA ? join(process.env.APPDATA, 'npm') : undefined,
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'npm') : undefined,
+      process.env.APPDATA ? join(process.env.APPDATA, 'pnpm') : undefined,
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'pnpm') : undefined,
+      join(homedir(), '.local', 'bin'),
+      join(homedir(), 'scoop', 'shims'),
+      join(homedir(), '.volta', 'bin'),
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Volta', 'bin') : undefined,
+      process.env.ProgramData ? join(process.env.ProgramData, 'chocolatey', 'bin') : undefined,
+      process.env.ProgramFiles ? join(process.env.ProgramFiles, 'nodejs') : undefined,
+      process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'nodejs') : undefined
+    ].flatMap((directory) => directory ? fileNames.map((fileName) => join(directory, fileName)) : [])
+  ]
+  return existingAgentExecutable(name, candidates)
+}
+
+function windowsVolumeRoots(): string[] {
+  if (process.platform !== 'win32') return []
+  return Array.from({ length: 26 }, (_, index) => `${String.fromCharCode(65 + index)}:\\`).filter((root) => existsSync(root))
+}
+
+async function scanWindowsVolumes(name: AgentExecutableName): Promise<string | undefined> {
+  if (process.platform !== 'win32') return undefined
+  const results = await Promise.all(windowsVolumeRoots().map(async (root) => {
+    const result = await runLocator('where.exe', ['/R', root, `${name}.*`], 8_000)
+    if (result.exitCode !== 0) return undefined
+    return existingAgentExecutable(name, result.stdout.split(/\r?\n/).map((line) => line.trim()))
+  }))
+  return results.find((result): result is string => Boolean(result))
+}
+
+async function discoverAgentExecutable(name: AgentExecutableName, scanAllDrives: boolean): Promise<AgentExecutableDiscovery> {
+  const onPath = await executableOnPath(name)
+  if (onPath) return { location: onPath, source: 'path' }
+  const knownLocation = await knownAgentExecutable(name)
+  if (knownLocation) return { location: knownLocation, source: 'known-location' }
+  if (scanAllDrives) {
+    const scannedLocation = await scanWindowsVolumes(name)
+    if (scannedLocation) return { location: scannedLocation, source: 'volume-scan' }
+  }
+  return { source: 'not-found' }
 }
 
 export class VibeGitService {
@@ -154,7 +303,7 @@ export class VibeGitService {
       ready: this.database.health(),
       database: 'ok',
       git,
-      version: '0.1.0'
+      version: '1.0.0'
     }
   }
 
@@ -219,6 +368,7 @@ export class VibeGitService {
   async initializeProtection(projectId: string): Promise<{ project: Project; checkpoint: Checkpoint }> {
     const project = this.requireProject(projectId)
     await this.git.initialize(project.path)
+    await ensureProjectProtectionMarker(this.git, project.path)
     const updated: Project = {
       ...project,
       isGitRepository: true,
@@ -257,6 +407,7 @@ export class VibeGitService {
       this.database.upsertProject(updated)
       return updated
     }
+    if (project.protectionEnabled) await ensureProjectProtectionMarker(this.git, project.path)
     const [status, remoteUrl, capture] = await Promise.all([
       this.git.getStatus(project.path),
       this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME),
@@ -297,6 +448,25 @@ export class VibeGitService {
 
   listCheckpoints(projectId: string): Checkpoint[] {
     return this.checkpoints.list(projectId)
+  }
+
+  renameCheckpoint(checkpointId: string, title: string): Checkpoint {
+    const normalized = title.trim().replace(/\s+/g, ' ')
+    if (!normalized || normalized.length > 160) {
+      throw new VibeGitError('INVALID_CHECKPOINT_TITLE', '保存点名称需要是 1 到 160 个字符')
+    }
+    return this.database.renameCheckpoint(checkpointId, normalized)
+  }
+
+  async deleteCheckpoint(checkpointId: string): Promise<{ checkpointId: string; projectId: string }> {
+    const checkpoint = this.database.prepareCheckpointDeletion(checkpointId)
+    const project = this.requireProject(checkpoint.projectId)
+    // Validate before removing the private Git ref. The database repeats the
+    // validation transactionally when it removes the record.
+    await this.git.deleteCheckpointRef(project.path, checkpoint.id)
+    this.database.deleteCheckpoint(checkpoint.id)
+    await this.refreshProject(project.id)
+    return { checkpointId: checkpoint.id, projectId: project.id }
   }
 
   async getCheckpointDiff(checkpointId: string): Promise<CheckpointDiff> {
@@ -343,8 +513,16 @@ export class VibeGitService {
     return this.database.listFailedRestoresWithRecovery(projectId)
   }
 
-  async handleAgentEvent(event: AgentEvent): Promise<AgentEventResult> {
-    return await this.agentEvents.handle(event)
+  async handleAgentEvent(event: AgentEvent, options?: { enforceSummary?: boolean }): Promise<AgentEventResult> {
+    const result = await this.agentEvents.handle(event, options)
+    const project = this.requireProject(result.event.projectId)
+    await ensureProjectProtectionMarker(this.git, project.path)
+    return result
+  }
+
+  async hasProjectProtectionMarker(projectId: string): Promise<boolean> {
+    const project = this.requireProject(projectId)
+    return await hasProjectProtectionMarker(this.git, project.path)
   }
 
   async recordAgentSummary(input: RecordAgentSummaryInput): Promise<void> {
@@ -386,22 +564,26 @@ export class VibeGitService {
     return await this.github.push(projectId)
   }
 
-  async agentStatus(): Promise<AgentConnectionStatus> {
-    const [codexInstalled, claudeInstalled] = await Promise.all([
-      agentExecutableAvailable('codex'),
-      agentExecutableAvailable('claude')
+  async agentStatus(options: { scanAllDrives?: boolean } = {}): Promise<AgentConnectionStatus> {
+    const [codex, claudeCode] = await Promise.all([
+      discoverAgentExecutable('codex', options.scanAllDrives === true),
+      discoverAgentExecutable('claude', options.scanAllDrives === true)
     ])
-    return {
-      codex: {
-        installed: codexInstalled,
-        integration: codexInstalled ? 'template' : 'not_configured',
-        detail: codexInstalled ? '检测到 Codex；事件 CLI 模板可用' : '未在 PATH 中检测到 Codex CLI'
-      },
-      claudeCode: {
-        installed: claudeInstalled,
-        integration: claudeInstalled ? 'template' : 'not_configured',
-        detail: claudeInstalled ? '检测到 Claude Code；事件 CLI 模板可用' : '未在 PATH 中检测到 Claude Code'
+    const describe = (label: string, discovery: AgentExecutableDiscovery): AgentConnectionStatus['codex'] => {
+      const detected = Boolean(discovery.location)
+      return {
+        installed: detected,
+        integration: detected ? 'template' : 'not_configured',
+        detail: detected
+          ? `检测到 ${label}；事件 CLI 模板可用`
+          : `未在 PATH 中检测到 ${label}`,
+        detection: discovery.source,
+        ...(discovery.location ? { location: discovery.location } : {})
       }
+    }
+    return {
+      codex: describe('Codex', codex),
+      claudeCode: describe('Claude Code', claudeCode)
     }
   }
 

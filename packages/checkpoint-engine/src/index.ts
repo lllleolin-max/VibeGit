@@ -165,6 +165,21 @@ export class CheckpointEngine {
     return await this.withProjectOperation(input.projectId, async () => await this.createLocked(input))
   }
 
+  async hasPendingChanges(projectId: string): Promise<boolean> {
+    const project = this.database.getProject(projectId)
+    if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+    if (!(await this.git.isRepository(project.path))) {
+      throw new VibeGitError('NOT_A_GIT_PROJECT', '此项目尚未开启版本保护')
+    }
+    const baseline = this.database.getActiveCheckpoint(project.id) ?? this.database.getLatestCheckpoint(project.id)
+    if (!baseline) return false
+    const [previousTree, capture] = await Promise.all([
+      this.git.getCommitTree(project.path, baseline.gitObjectId),
+      this.git.captureWorktreeTree(project.path)
+    ])
+    return previousTree !== capture.treeObjectId
+  }
+
   private async createLocked(input: CreateCheckpointInput): Promise<Checkpoint | undefined> {
     const project = this.database.getProject(input.projectId)
     if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')

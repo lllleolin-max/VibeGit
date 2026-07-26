@@ -22,6 +22,25 @@ function print(result: ApiResult<unknown>): void {
   stdout.write(`${JSON.stringify(result, null, 2)}\n`)
 }
 
+function hookContext(sessionId?: string): Record<string, unknown> {
+  const sessionInstruction = sessionId
+    ? ` Use sessionId "${sessionId}" in the summary JSON so VibeGit can attach it to this exact Agent session.`
+    : ''
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext: `This project is protected by VibeGit. For any meaningful project-file change, use the vibegit-change-summary Skill after validation and before task completion. Submit its JSON through vibegit summary --stdin. A VibeGit Stop Hook will ask you to continue if the summary is missing.${sessionInstruction}`
+    }
+  }
+}
+
+function hookSummaryRequired(): Record<string, unknown> {
+  return {
+    decision: 'block',
+    reason: 'VibeGit detected project-file changes without a plain-language checkpoint summary. Use the vibegit-change-summary Skill now, submit it with vibegit summary --stdin for this project and session, then finish the task.'
+  }
+}
+
 function help(): void {
   stdout.write(`VibeGit CLI\n\n`)
   stdout.write(`用法:\n`)
@@ -60,7 +79,16 @@ async function main(): Promise<void> {
       const event = adaptHookEvent(JSON.parse(raw) as unknown, args[1] as 'codex' | 'claude-code')
       if (event) {
         try {
-          await service.handleAgentEvent(event)
+          const handled = await service.handleAgentEvent(event, { enforceSummary: true })
+          const protectedProject = await service.hasProjectProtectionMarker(handled.event.projectId)
+          if (protectedProject && event.event === 'task-start') {
+            stdout.write(`${JSON.stringify(hookContext(event.sessionId))}\n`)
+            return
+          }
+          if (protectedProject && handled.summaryRequired) {
+            stdout.write(`${JSON.stringify(hookSummaryRequired())}\n`)
+            return
+          }
         } catch (error) {
           if (!(error instanceof VibeGitError) || ![
             'PROJECT_NOT_REGISTERED',

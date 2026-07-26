@@ -593,6 +593,53 @@ export class VibeGitDatabase {
     return rows.map(mapCheckpoint)
   }
 
+  renameCheckpoint(checkpointId: string, title: string): Checkpoint {
+    return this.transaction(() => {
+      const checkpoint = this.getCheckpoint(checkpointId)
+      if (!checkpoint) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到这个保存点')
+      this.db.prepare('UPDATE checkpoints SET title = ? WHERE id = ?').run(title, checkpointId)
+      return { ...checkpoint, title }
+    })
+  }
+
+  prepareCheckpointDeletion(checkpointId: string): Checkpoint {
+    const checkpoint = this.getCheckpoint(checkpointId)
+    if (!checkpoint) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到这个保存点')
+    const checkpointCount = this.db.prepare('SELECT COUNT(*) AS count FROM checkpoints WHERE project_id = ?').get(checkpoint.projectId) as { count: number }
+    if (checkpointCount.count <= 1) {
+      throw new VibeGitError('CHECKPOINT_DELETE_LAST_FORBIDDEN', '至少保留一个保存点，才能继续安全恢复项目', {
+        remediation: '请保留这个最后的保存点，或在创建新的保存点后再删除旧记录。'
+      })
+    }
+    const restoreReference = this.db.prepare(`
+      SELECT id FROM restores WHERE target_checkpoint_id = ? OR insurance_checkpoint_id = ? LIMIT 1
+    `).get(checkpointId, checkpointId) as { id: string } | undefined
+    const shelfReference = this.db.prepare('SELECT id FROM shelves WHERE checkpoint_id = ? LIMIT 1').get(checkpointId) as { id: string } | undefined
+    if (restoreReference || shelfReference) {
+      throw new VibeGitError('CHECKPOINT_DELETE_IN_USE', '这个保存点正在被恢复记录或暂存修改使用，暂时不能删除', {
+        remediation: '请先完成或移除相关的恢复、暂存记录，再删除该保存点。'
+      })
+    }
+    return checkpoint
+  }
+
+  deleteCheckpoint(checkpointId: string): Checkpoint {
+    return this.transaction(() => {
+      const checkpoint = this.prepareCheckpointDeletion(checkpointId)
+
+      const activeRow = this.db.prepare('SELECT active_checkpoint_id FROM projects WHERE id = ?').get(checkpoint.projectId) as { active_checkpoint_id: string | null } | undefined
+      const fallback = checkpoint.parentCheckpointId
+        ? this.getCheckpoint(checkpoint.parentCheckpointId)
+        : this.listCheckpoints(checkpoint.projectId).find((item) => item.id !== checkpointId)
+      this.db.prepare('UPDATE checkpoints SET parent_checkpoint_id = ? WHERE parent_checkpoint_id = ?').run(checkpoint.parentCheckpointId ?? null, checkpointId)
+      this.db.prepare('UPDATE agent_events SET checkpoint_id = NULL WHERE checkpoint_id = ?').run(checkpointId)
+      if (activeRow?.active_checkpoint_id === checkpointId) this.setActiveCheckpoint(checkpoint.projectId, fallback?.id)
+      const result = this.db.prepare('DELETE FROM checkpoints WHERE id = ?').run(checkpointId)
+      if (Number(result.changes) !== 1) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到这个保存点')
+      return checkpoint
+    })
+  }
+
   markCheckpointSynced(checkpointId: string, syncedAt: string): void {
     this.transaction(() => {
       const checkpoint = this.getCheckpoint(checkpointId)
