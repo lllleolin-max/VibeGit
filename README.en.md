@@ -165,7 +165,7 @@ Read the [security design](docs/SECURITY.md) and [architecture](docs/ARCHITECTUR
 
 ## Release status
 
-**Current stable release: [v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 installer and runnable source**
+**Current stable release: [v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 installer and runnable source**
 
 The verified core workflow includes local version protection, checkpoints and timeline, diffs, previewed restore and undo, shelving, private GitHub backup, the Electron desktop UI, and the unified Agent Events CLI.
 

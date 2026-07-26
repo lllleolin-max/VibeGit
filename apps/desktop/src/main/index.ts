@@ -194,6 +194,11 @@ function registerIpc(): void {
       ...(note ? { note } : {})
     })
   })
+  registerHandler(IPC_CHANNELS.renameCheckpoint, (checkpointId: string, title: string) => requiredService().renameCheckpoint(
+    requireString(checkpointId, 'checkpointId', 100),
+    requireString(title, 'title', 160)
+  ))
+  registerHandler(IPC_CHANNELS.deleteCheckpoint, (checkpointId: string) => requiredService().deleteCheckpoint(requireString(checkpointId, 'checkpointId', 100)))
   registerHandler(IPC_CHANNELS.getCheckpointDiff, (checkpointId: string) => requiredService().getCheckpointDiff(requireString(checkpointId, 'checkpointId', 100)))
   registerHandler(IPC_CHANNELS.prepareRestore, (projectId: string, checkpointId: string) => requiredService().prepareRestore(
     requireString(projectId, 'projectId', 100),
@@ -280,7 +285,7 @@ function registerIpc(): void {
       await installGitHubCli()
       github = await reloadService().githubStatus()
     }
-    const agents = await requiredService().agentStatus()
+    const agents = await requiredService().agentStatus({ scanAllDrives: true })
     const changeSummarySkill = await requiredService().changeSummarySkillStatus(agents)
     return {
       github,

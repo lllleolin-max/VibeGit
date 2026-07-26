@@ -24,6 +24,7 @@ import {
   Maximize2,
   Minus,
   MoreHorizontal,
+  Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -65,6 +66,8 @@ type Modal =
   | { kind: 'backup' }
   | { kind: 'shelf' }
   | { kind: 'remove-project'; project: Project }
+  | { kind: 'rename-checkpoint'; checkpoint: Checkpoint }
+  | { kind: 'delete-checkpoint'; checkpoint: Checkpoint }
   | null
 
 type DisplayLanguage = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'ru' | 'ar'
@@ -216,6 +219,17 @@ const UI_TRANSLATIONS: Record<string, TranslationSet> = {
   , '将删除本地 VibeGit 保存点和操作记录': { 'zh-TW': '將刪除本機 VibeGit 儲存點和操作記錄', en: 'Local VibeGit checkpoints and activity history will be deleted', ja: 'ローカルの VibeGit 保存ポイントと操作履歴が削除されます', ko: '로컬 VibeGit 저장 지점과 작업 기록이 삭제됩니다', ru: 'Будут удалены локальные точки сохранения и история действий VibeGit', ar: 'سيتم حذف نقاط الحفظ المحلية وسجل النشاط في VibeGit' }
   , '不会删除你的项目文件、Git 仓库，也不会删除 GitHub 上已有的备份。': { 'zh-TW': '不會刪除你的專案檔案、Git 儲存庫，也不會刪除 GitHub 上已有的備份。', en: 'Your project files, Git repository, and existing GitHub backups will not be deleted.', ja: 'プロジェクトファイル、Git リポジトリ、既存の GitHub バックアップは削除されません。', ko: '프로젝트 파일, Git 저장소 및 기존 GitHub 백업은 삭제되지 않습니다.', ru: 'Ваши файлы проекта, репозиторий Git и существующие резервные копии GitHub удалены не будут.', ar: 'لن يتم حذف ملفات مشروعك أو مستودع Git أو النسخ الاحتياطية الموجودة على GitHub.' }
   , '我了解：这只会删除 VibeGit 的本地备份记录': { 'zh-TW': '我了解：這只會刪除 VibeGit 的本機備份記錄', en: 'I understand: this deletes only VibeGit local backup records', ja: '理解しました：VibeGit のローカルバックアップ記録のみを削除します', ko: '이해했습니다: VibeGit 로컬 백업 기록만 삭제됩니다', ru: 'Я понимаю: будут удалены только локальные записи резервного копирования VibeGit', ar: 'أفهم: سيؤدي هذا إلى حذف سجلات النسخ الاحتياطية المحلية لـ VibeGit فقط' }
+  , '重命名保存点': { 'zh-TW': '重新命名儲存點', en: 'Rename checkpoint', ja: '保存ポイントの名前を変更', ko: '저장 지점 이름 바꾸기', ru: 'Переименовать точку сохранения', ar: 'إعادة تسمية نقطة الحفظ' }
+  , '删除保存点': { 'zh-TW': '刪除儲存點', en: 'Delete checkpoint', ja: '保存ポイントを削除', ko: '저장 지점 삭제', ru: 'Удалить точку сохранения', ar: 'حذف نقطة الحفظ' }
+  , '修改后的名称会用于时间线显示，不会改动项目文件或代码。': { 'zh-TW': '修改後的名稱會用於時間線顯示，不會改動專案檔案或程式碼。', en: 'The new name appears in the timeline and does not change project files or code.', ja: '新しい名前はタイムラインに表示され、プロジェクトのファイルやコードは変更されません。', ko: '새 이름은 타임라인에 표시되며 프로젝트 파일이나 코드를 변경하지 않습니다.', ru: 'Новое имя отображается на шкале времени и не меняет файлы или код проекта.', ar: 'يظهر الاسم الجديد في المخطط الزمني ولا يغير ملفات المشروع أو التعليمات البرمجية.' }
+  , '保存点名称': { 'zh-TW': '儲存點名稱', en: 'Checkpoint name', ja: '保存ポイント名', ko: '저장 지점 이름', ru: 'Название точки сохранения', ar: 'اسم نقطة الحفظ' }
+  , '保存名称': { 'zh-TW': '儲存名稱', en: 'Save name', ja: '名前を保存', ko: '이름 저장', ru: 'Сохранить имя', ar: 'حفظ الاسم' }
+  , '请确认是否删除所选保存点。': { 'zh-TW': '請確認是否刪除所選儲存點。', en: 'Confirm whether to delete the selected checkpoint.', ja: '選択した保存ポイントを削除するか確認してください。', ko: '선택한 저장 지점을 삭제할지 확인하세요.', ru: 'Подтвердите удаление выбранной точки сохранения.', ar: 'يرجى تأكيد حذف نقطة الحفظ المحددة.' }
+  , '此操作会移除这个本地保存点和它的 Git 记录。': { 'zh-TW': '此操作會移除這個本機儲存點及其 Git 記錄。', en: 'This removes this local checkpoint and its Git record.', ja: 'このローカル保存ポイントとその Git 記録を削除します。', ko: '이 로컬 저장 지점과 Git 기록을 제거합니다.', ru: 'Будут удалены эта локальная точка сохранения и её запись Git.', ar: 'سيؤدي ذلك إلى إزالة نقطة الحفظ المحلية هذه وسجل Git الخاص بها.' }
+  , '项目文件、代码和其他保存点不会被删除。为保证可恢复性，VibeGit 会保留最后一个保存点。': { 'zh-TW': '專案檔案、程式碼和其他儲存點不會被刪除。為確保可還原性，VibeGit 會保留最後一個儲存點。', en: 'Project files, code, and other checkpoints are not deleted. VibeGit keeps the final checkpoint so the project remains recoverable.', ja: 'プロジェクトのファイル、コード、ほかの保存ポイントは削除されません。復元できるよう、VibeGit は最後の保存ポイントを残します。', ko: '프로젝트 파일, 코드, 다른 저장 지점은 삭제되지 않습니다. 복구를 위해 VibeGit은 마지막 저장 지점을 유지합니다.', ru: 'Файлы проекта, код и другие точки сохранения не удаляются. VibeGit сохраняет последнюю точку, чтобы проект можно было восстановить.', ar: 'لن يتم حذف ملفات المشروع أو الرمز أو نقاط الحفظ الأخرى. يحتفظ VibeGit بآخر نقطة حفظ حتى يظل المشروع قابلاً للاستعادة.' }
+  , '我已了解，确认删除这个保存点': { 'zh-TW': '我已了解，確認刪除這個儲存點', en: 'I understand and confirm deleting this checkpoint', ja: '理解しました。この保存ポイントを削除します', ko: '이해했으며 이 저장 지점 삭제를 확인합니다', ru: 'Я понимаю и подтверждаю удаление этой точки сохранения', ar: 'أفهم وأؤكد حذف نقطة الحفظ هذه' }
+  , '确认删除保存点': { 'zh-TW': '確認刪除儲存點', en: 'Confirm delete checkpoint', ja: '保存ポイントの削除を確認', ko: '저장 지점 삭제 확인', ru: 'Подтвердить удаление точки сохранения', ar: 'تأكيد حذف نقطة الحفظ' }
+  , '已通过全盘扫描定位 Agent': { 'zh-TW': '已透過全磁碟掃描定位 Agent', en: 'An Agent was found through a full-disk scan', ja: '全ディスクスキャンで Agent が見つかりました', ko: '전체 디스크 검사에서 Agent를 찾았습니다', ru: 'Agent найден полным сканированием диска', ar: 'تم العثور على Agent عبر فحص كامل للقرص' }
 }
 
 function translateVisibleUi(language: DisplayLanguage): void {
@@ -483,6 +497,41 @@ export function App(): ReactNode {
     }
   }
 
+  const renameCheckpoint = async (checkpoint: Checkpoint, title: string): Promise<void> => {
+    setBusy(`rename-${checkpoint.id}`)
+    setError(undefined)
+    try {
+      const renamed = unwrap(await window.vibegit.renameCheckpoint(checkpoint.id, title))
+      setSelectedCheckpoint((current) => current?.id === renamed.id ? renamed : current)
+      setModal(null)
+      await Promise.all([loadProjects(), loadTimeline(renamed.projectId)])
+      setNotice({ message: `已将保存点重命名为“${renamed.title}”。` })
+    } catch (value) {
+      setError(errorFrom(value))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
+  const deleteCheckpoint = async (checkpoint: Checkpoint): Promise<void> => {
+    setBusy(`delete-${checkpoint.id}`)
+    setError(undefined)
+    try {
+      unwrap(await window.vibegit.deleteCheckpoint(checkpoint.id))
+      if (selectedCheckpoint?.id === checkpoint.id) {
+        setSelectedCheckpoint(undefined)
+        setDiff(undefined)
+      }
+      setModal(null)
+      await Promise.all([loadProjects(), loadTimeline(checkpoint.projectId)])
+      setNotice({ message: `已删除保存点“${checkpoint.title}”；项目文件没有被删除。` })
+    } catch (value) {
+      setError(errorFrom(value))
+    } finally {
+      setBusy(undefined)
+    }
+  }
+
   const initializeProtection = async (): Promise<void> => {
     if (!selectedProject) return
     setBusy('initialize')
@@ -627,6 +676,8 @@ export function App(): ReactNode {
             onShelf={() => setModal({ kind: 'shelf' })}
             onBackup={() => setModal({ kind: 'backup' })}
             onOpenCheckpoint={(checkpoint) => void openCheckpoint(checkpoint)}
+            onRenameCheckpoint={(checkpoint) => setModal({ kind: 'rename-checkpoint', checkpoint })}
+            onDeleteCheckpoint={(checkpoint) => setModal({ kind: 'delete-checkpoint', checkpoint })}
           />
         )}
       </main>
@@ -703,6 +754,22 @@ export function App(): ReactNode {
           busy={busy === `remove-${modal.project.id}`}
           onClose={() => setModal(null)}
           onConfirm={() => void removeProject(modal.project)}
+        />
+      )}
+      {modal?.kind === 'rename-checkpoint' && (
+        <RenameCheckpointModal
+          checkpoint={modal.checkpoint}
+          busy={busy === `rename-${modal.checkpoint.id}`}
+          onClose={() => setModal(null)}
+          onConfirm={(title) => void renameCheckpoint(modal.checkpoint, title)}
+        />
+      )}
+      {modal?.kind === 'delete-checkpoint' && (
+        <DeleteCheckpointModal
+          checkpoint={modal.checkpoint}
+          busy={busy === `delete-${modal.checkpoint.id}`}
+          onClose={() => setModal(null)}
+          onConfirm={() => void deleteCheckpoint(modal.checkpoint)}
         />
       )}
       </div>
@@ -812,6 +879,8 @@ function ProjectWorkspace(props: {
   onShelf(): void
   onBackup(): void
   onOpenCheckpoint(checkpoint: Checkpoint): void
+  onRenameCheckpoint(checkpoint: Checkpoint): void
+  onDeleteCheckpoint(checkpoint: Checkpoint): void
 }): ReactNode {
   const { project } = props
   const latestNoChange = props.agentEvents.find((event) => event.event === 'task-end' && !event.checkpointId)
@@ -846,7 +915,7 @@ function ProjectWorkspace(props: {
             <div className="timeline-heading"><div><p className="eyebrow">项目时间线</p><h2>你的安全保存记录</h2></div><span>{props.checkpoints.length} 个保存点</span></div>
             {latestNoChange && <div className="agent-no-change" role="status"><CheckCircle2 size={17} /><div><strong>任务完成，但没有检测到文件变化</strong><small>{agentLabel(latestNoChange.agent)}{latestNoChange.taskText ? `：${latestNoChange.taskText}` : ' 本轮没有需要保存的新文件内容。'}</small></div></div>}
             {props.failedRestores.map((restore) => <div className="restore-recovery-alert" key={restore.id} role="alert"><AlertTriangle size={18} /><div><strong>有一次未完成的回退需要留意</strong><small>保险点仍在；如有已移动的文件，它们保存在恢复区，可随时打开查看。</small></div><button className="button ghost" onClick={() => void window.vibegit.openRecoveryDirectory(restore.id)}><FolderOpen size={15} />打开恢复区</button></div>)}
-            {props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} changePresentation={props.changePresentation} onOpen={props.onOpenCheckpoint} />}
+            {props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} changePresentation={props.changePresentation} onOpen={props.onOpenCheckpoint} onRename={props.onRenameCheckpoint} onDelete={props.onDeleteCheckpoint} />}
           </div>
         </>
       )}
@@ -854,26 +923,40 @@ function ProjectWorkspace(props: {
   )
 }
 
-function Timeline({ checkpoints, changePresentation, onOpen }: { checkpoints: Checkpoint[]; changePresentation: ChangePresentation; onOpen(checkpoint: Checkpoint): void }): ReactNode {
+function Timeline({ checkpoints, changePresentation, onOpen, onRename, onDelete }: { checkpoints: Checkpoint[]; changePresentation: ChangePresentation; onOpen(checkpoint: Checkpoint): void; onRename(checkpoint: Checkpoint): void; onDelete(checkpoint: Checkpoint): void }): ReactNode {
   return (
     <div className="timeline">
       {checkpoints.map((checkpoint, index) => {
         const type = checkpointType(checkpoint.type)
         return (
-          <button className="timeline-item" key={checkpoint.id} onClick={() => onOpen(checkpoint)}>
+          <article className="timeline-item" key={checkpoint.id}>
             <div className="timeline-rail"><span className={`timeline-node ${type.tone}`}>{checkpoint.type === 'post_agent' ? <Sparkles size={15} /> : checkpoint.type === 'pre_restore' ? <ShieldAlert size={15} /> : <Save size={15} />}</span>{index < checkpoints.length - 1 && <i />}</div>
             <div className="timeline-card">
-              <div className="timeline-card-title"><div><h3>{checkpoint.title}</h3><span className={`pill ${type.tone}`}>{type.label}</span></div><MoreHorizontal size={18} /></div>
-              {checkpoint.taskText && <p className="task-text">“{checkpoint.taskText}”</p>}
-              {changePresentation === 'feature' && featureSummaryOf(checkpoint)?.overview && <p className="feature-summary-preview">{featureSummaryOf(checkpoint)!.overview}</p>}
-              <div className="timeline-meta"><span><Sparkles size={14} />{agentLabel(checkpoint.agent)}</span><span><Clock3 size={14} />{formatRelativeTime(checkpoint.createdAt)}</span><span><FileCode2 size={14} />{checkpoint.changedFiles.length} 个文件</span><span className="changes"><b>+{checkpoint.insertions}</b><em>−{checkpoint.deletions}</em></span></div>
-              <div className="timeline-footer"><span className={checkpoint.testStatus === 'passed' ? 'good' : 'muted'}>{checkpoint.testStatus === 'passed' ? '测试通过' : checkpoint.testStatus === 'failed' ? '测试未通过' : '未关联测试'}</span><span className={checkpoint.githubSyncStatus === 'synced' ? 'good' : 'muted'}>{checkpoint.githubSyncStatus === 'synced' ? '已备份' : '仅保存在本机'}</span><span className="link-copy">{changePresentation === 'feature' ? '查看功能变化' : '查看代码变更'} <ChevronRight size={14} /></span></div>
+              <button className="timeline-card-open" onClick={() => onOpen(checkpoint)}>
+                <div className="timeline-card-title"><div><h3>{checkpoint.title}</h3><span className={`pill ${type.tone}`}>{type.label}</span></div></div>
+                {checkpoint.taskText && <p className="task-text">“{checkpoint.taskText}”</p>}
+                {changePresentation === 'feature' && featureSummaryOf(checkpoint)?.overview && <p className="feature-summary-preview">{featureSummaryOf(checkpoint)!.overview}</p>}
+                <div className="timeline-meta"><span><Sparkles size={14} />{agentLabel(checkpoint.agent)}</span><span><Clock3 size={14} />{formatRelativeTime(checkpoint.createdAt)}</span><span><FileCode2 size={14} />{checkpoint.changedFiles.length} 个文件</span><span className="changes"><b>+{checkpoint.insertions}</b><em>−{checkpoint.deletions}</em></span></div>
+                <div className="timeline-footer"><span className={checkpoint.testStatus === 'passed' ? 'good' : 'muted'}>{checkpoint.testStatus === 'passed' ? '测试通过' : checkpoint.testStatus === 'failed' ? '测试未通过' : '未关联测试'}</span><span className={checkpoint.githubSyncStatus === 'synced' ? 'good' : 'muted'}>{checkpoint.githubSyncStatus === 'synced' ? '已备份' : '仅保存在本机'}</span><span className="link-copy">{changePresentation === 'feature' ? '查看功能变化' : '查看代码变更'} <ChevronRight size={14} /></span></div>
+              </button>
+              <CheckpointActions checkpoint={checkpoint} onRename={onRename} onDelete={onDelete} />
             </div>
-          </button>
+          </article>
         )
       })}
     </div>
   )
+}
+
+function CheckpointActions({ checkpoint, onRename, onDelete }: { checkpoint: Checkpoint; onRename(checkpoint: Checkpoint): void; onDelete(checkpoint: Checkpoint): void }): ReactNode {
+  const [open, setOpen] = useState(false)
+  return <div className="checkpoint-actions">
+    <button className="checkpoint-menu-trigger" aria-label="打开保存点操作菜单" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={18} /></button>
+    {open && <div className="checkpoint-menu" role="menu" aria-label={`${checkpoint.title} 的操作`}>
+      <button role="menuitem" onClick={() => { setOpen(false); onRename(checkpoint) }}><Pencil size={15} />重命名保存点</button>
+      <button className="danger" role="menuitem" onClick={() => { setOpen(false); onDelete(checkpoint) }}><Trash2 size={15} />删除保存点</button>
+    </div>}
+  </div>
 }
 
 function EmptyTimeline({ onSave }: { onSave(): void }): ReactNode {
@@ -943,6 +1026,27 @@ function SaveModal(props: { project: Project; busy: boolean; onClose(): void; on
   const submit = (event: FormEvent): void => { event.preventDefault(); if (title.trim()) void props.onSave(title.trim(), stable, note.trim() || undefined) }
   return <ModalFrame title="创建保存点" subtitle={`保存 ${props.project.name} 的当前状态，文件会继续留在原处。`} onClose={props.onClose}>
     <form onSubmit={submit} className="modal-form"><label>给这个版本一个容易记住的名字<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} placeholder="例如：邮箱验证码登录完成" /></label><label>备注（可选）<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="记录为什么保存这个版本" /></label><label className="check-row"><input type="checkbox" checked={stable} onChange={(event) => setStable(event.target.checked)} /><span><strong>标记为稳定版本</strong><small>表示这是你确认可以正常使用的版本</small></span></label><div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose}>取消</button><button className="button primary" disabled={props.busy || !title.trim()}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}保存当前版本</button></div></form>
+  </ModalFrame>
+}
+
+function RenameCheckpointModal(props: { checkpoint: Checkpoint; busy: boolean; onClose(): void; onConfirm(title: string): void }): ReactNode {
+  const [title, setTitle] = useState(props.checkpoint.title)
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    if (title.trim()) props.onConfirm(title.trim())
+  }
+  return <ModalFrame title="重命名保存点" subtitle="修改后的名称会用于时间线显示，不会改动项目文件或代码。" onClose={props.onClose}>
+    <form className="checkpoint-name-form" onSubmit={submit}>
+      <label>保存点名称<input aria-label="保存点名称" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} autoFocus /></label>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose}>取消</button><button className="button primary" disabled={!title.trim() || props.busy}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Pencil size={16} />}保存名称</button></div>
+    </form>
+  </ModalFrame>
+}
+
+function DeleteCheckpointModal(props: { checkpoint: Checkpoint; busy: boolean; onClose(): void; onConfirm(): void }): ReactNode {
+  const [confirmed, setConfirmed] = useState(false)
+  return <ModalFrame danger title="删除保存点" subtitle="请确认是否删除所选保存点。" onClose={props.onClose}>
+    <div className="checkpoint-delete-content"><div className="remove-project-warning"><Trash2 size={20} /><div><strong>此操作会移除这个本地保存点和它的 Git 记录。</strong><p>项目文件、代码和其他保存点不会被删除。为保证可恢复性，VibeGit 会保留最后一个保存点。</p></div></div><label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解，确认删除这个保存点</label><div className="modal-actions"><button className="button ghost" onClick={props.onClose}>取消</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}确认删除保存点</button></div></div>
   </ModalFrame>
 }
 
@@ -1184,7 +1288,8 @@ function EnvironmentPreferences(): ReactNode {
   }
 
   const skillStatus = !result ? undefined : !result.changeSummarySkill.codex.available && !result.changeSummarySkill.claudeCode.available ? '没有需要部署的 Agent' : result.changeSummarySkill.ready ? '已部署' : '待部署'
-  return <><section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><TerminalSquare size={19} /><div><h2>配置环境</h2><p>扫描 GitHub CLI、Codex、Claude Code 和 VibeGit 改动说明 Skill。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。</p></div></div><div className="preferences-action"><div className="environment-result">{result ? <><span><i className={result.github.installed ? 'status-dot safe' : 'status-dot'} />GitHub CLI：{result.github.installed ? '已就绪' : '未找到'} · Codex：{result.agents.codex.installed ? '已检测' : '未找到'} · Claude Code：{result.agents.claudeCode.installed ? '已检测' : '未找到'}</span><span className={result.changeSummarySkill.ready ? 'environment-skill ready' : 'environment-skill missing'}><span>VibeGit 改动说明 Skill：</span>{skillStatus}</span></> : '尚未检测'}</div><button className="button primary small" disabled={busy} onClick={() => void check()}>{busy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}检测配置环境</button></div>{result?.githubCliInstallAttempted && <p className="preferences-notice">{result.githubCliInstalled ? '已自动安装 GitHub CLI；如仍未显示，请重启 VibeGit 后再次检测。' : result.message}</p>}{error && <p className="preferences-notice error">{error}</p>}</div></section>{skillCommand && <SkillDeploymentModal command={skillCommand} onClose={() => setSkillCommand(undefined)} />}</>
+  const foundByVolumeScan = result?.agents.codex.detection === 'volume-scan' || result?.agents.claudeCode.detection === 'volume-scan'
+  return <><section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><TerminalSquare size={19} /><div><h2>配置环境</h2><p>扫描 GitHub CLI、Codex、Claude Code 和 VibeGit 改动说明 Skill。缺少 GitHub CLI 时会通过 Windows 包管理器自动安装。</p></div></div><div className="preferences-action"><div className="environment-result">{result ? <><span><i className={result.github.installed ? 'status-dot safe' : 'status-dot'} />GitHub CLI：{result.github.installed ? '已就绪' : '未找到'} · Codex：{result.agents.codex.installed ? '已检测' : '未找到'} · Claude Code：{result.agents.claudeCode.installed ? '已检测' : '未找到'}</span>{foundByVolumeScan && <span className="environment-scan-notice">已通过全盘扫描定位 Agent</span>}<span className={result.changeSummarySkill.ready ? 'environment-skill ready' : 'environment-skill missing'}><span>VibeGit 改动说明 Skill：</span>{skillStatus}</span></> : '尚未检测'}</div><button className="button primary small" disabled={busy} onClick={() => void check()}>{busy ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}检测配置环境</button></div>{result?.githubCliInstallAttempted && <p className="preferences-notice">{result.githubCliInstalled ? '已自动安装 GitHub CLI；如仍未显示，请重启 VibeGit 后再次检测。' : result.message}</p>}{error && <p className="preferences-notice error">{error}</p>}</div></section>{skillCommand && <SkillDeploymentModal command={skillCommand} onClose={() => setSkillCommand(undefined)} />}</>
 }
 
 function SkillDeploymentModal({ command, onClose }: { command: string; onClose(): void }): ReactNode {

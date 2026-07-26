@@ -1,6 +1,6 @@
 {
   "name": "vibegit",
-  "version": "0.1.2",
+  "version": "1.0.0",
   "description": "A local, reversible project safety net for AI-assisted coding.",
   "main": "out/main/index.js",
   "private": true,

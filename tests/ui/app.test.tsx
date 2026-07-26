@@ -53,9 +53,9 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
   const completedRestore: RestoreRecord = { id: 'restore-1', projectId: project.id, targetCheckpointId: checkpoint.id, insuranceCheckpointId: 'insurance', createdAt: new Date().toISOString(), completedAt: new Date().toISOString(), status: 'completed' }
   const undoneRestore: RestoreRecord = { id: 'restore-1', projectId: project.id, targetCheckpointId: checkpoint.id, insuranceCheckpointId: 'insurance', createdAt: new Date().toISOString(), undoneAt: new Date().toISOString(), status: 'undone' }
   const diff: CheckpointDiff = { fromObjectId: 'old', toObjectId: 'abc123', insertions: 2, deletions: 1, files: [{ path: 'src/app.ts', kind: 'modified', patch: '@@ -1 +1,2 @@\n-old\n+new\n+added', binary: false, insertions: 2, deletions: 1 }] }
-  const agentStatus: AgentConnectionStatus = { codex: { installed: true, integration: 'template', detail: '已检测' }, claudeCode: { installed: false, integration: 'not_configured', detail: '未检测' } }
+  const agentStatus: AgentConnectionStatus = { codex: { installed: true, integration: 'template', detail: '已检测', detection: 'path' }, claudeCode: { installed: false, integration: 'not_configured', detail: '未检测', detection: 'not-found' } }
   const base: VibeGitApi = {
-    health: vi.fn(() => success<HealthStatus>({ ready: true, database: 'ok', git: 'ok', version: '0.1.0' })),
+    health: vi.fn(() => success<HealthStatus>({ ready: true, database: 'ok', git: 'ok', version: '1.0.0' })),
     selectProjectDirectory: vi.fn(() => success(null)),
     listProjects: vi.fn(() => success([])),
     addProject: vi.fn(() => success(project)),
@@ -64,6 +64,8 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     initializeProtection: vi.fn(() => success({ project, checkpoint })),
     listCheckpoints: vi.fn(() => success([])),
     createCheckpoint: vi.fn(() => success(checkpoint)),
+    renameCheckpoint: vi.fn((_checkpointId, title) => success({ ...checkpoint, title })),
+    deleteCheckpoint: vi.fn(() => success({ checkpointId: checkpoint.id, projectId: project.id })),
     getCheckpointDiff: vi.fn(() => success(diff)),
     prepareRestore: vi.fn(() => success(preview)),
     executeRestore: vi.fn(() => success(completedRestore)),
@@ -219,8 +221,8 @@ describe('VibeGit UI flow', () => {
       checkEnvironment: vi.fn(() => success({
         github: { installed: true, authenticated: false, message: 'ready' },
         agents: {
-          codex: { installed: true, integration: 'template' as const, detail: '已检测' },
-          claudeCode: { installed: false, integration: 'not_configured' as const, detail: '未检测' }
+          codex: { installed: true, integration: 'template' as const, detail: '已检测', detection: 'path' as const },
+          claudeCode: { installed: false, integration: 'not_configured' as const, detail: '未检测', detection: 'not-found' as const }
         },
         changeSummarySkill: {
           ready: false,
@@ -315,6 +317,36 @@ describe('VibeGit UI flow', () => {
     expect(await screen.findByText('已撤销本次回退，文件恢复到回退前状态')).toBeInTheDocument()
     await waitFor(() => expect(api.executeRestore).toHaveBeenCalledWith('restore-token'))
     expect(api.undoRestore).toHaveBeenCalledWith('restore-1')
+  })
+
+  it('opens checkpoint management without opening the diff, then renames and confirms deletion', async () => {
+    const api = mockApi({
+      listProjects: vi.fn(() => success([project])),
+      listCheckpoints: vi.fn(() => success([checkpoint]))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+
+    const projectButtons = await screen.findAllByRole('button', { name: /我的 AI 项目/ })
+    await user.click(projectButtons.at(-1)!)
+    await user.click(await screen.findByRole('button', { name: '打开保存点操作菜单' }))
+    expect(api.getCheckpointDiff).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('menuitem', { name: '重命名保存点' }))
+    const title = await screen.findByRole('textbox', { name: '保存点名称' })
+    await user.clear(title)
+    await user.type(title, '登录体验优化')
+    await user.click(screen.getByRole('button', { name: '保存名称' }))
+    await waitFor(() => expect(api.renameCheckpoint).toHaveBeenCalledWith(checkpoint.id, '登录体验优化'))
+
+    await user.click(await screen.findByRole('button', { name: '打开保存点操作菜单' }))
+    await user.click(screen.getByRole('menuitem', { name: '删除保存点' }))
+    const deleteButton = await screen.findByRole('button', { name: '确认删除保存点' })
+    expect(deleteButton).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: '我已了解，确认删除这个保存点' }))
+    await user.click(deleteButton)
+    await waitFor(() => expect(api.deleteCheckpoint).toHaveBeenCalledWith(checkpoint.id))
   })
 
   it('shows a plain-language feature summary by default and lets users switch to code changes', async () => {

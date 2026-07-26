@@ -1,11 +1,15 @@
 ---
 name: vibegit-change-summary
-description: After completing a coding task in a VibeGit-protected project, record a short plain-language summary so non-programmer users can understand the saved checkpoint.
+description: Mandatory workflow for every completed coding change in a project whose local .git/vibegit/protected.json marker enables vibegit-change-summary. After implementation and validation, before the final response, record a short plain-language VibeGit checkpoint summary.
+metadata:
+  vibegit-skill-version: 2
 ---
 
 # VibeGit change summary
 
-Use this skill after you have completed a meaningful coding task and before your final response. It writes the explanation into VibeGit's local data directory; do not create or commit a summary file inside the user's project.
+When a project contains `.git/vibegit/protected.json`, use this skill for every task that changes source code, project files, dependencies, configuration, or documentation. Do it after implementation and validation, immediately before your final response. It writes the explanation into VibeGit's local data directory; do not create or commit a summary file inside the user's project.
+
+VibeGit's Hook detects this private marker and injects the requirement at task start. Do not create a summary for read-only work or a task that made no project-file changes.
 
 ## What to record
 

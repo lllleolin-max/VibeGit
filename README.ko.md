@@ -158,7 +158,7 @@ VibeGit의 원칙은 **먼저 보호하고, 그다음 작업하는 것**입니�
 
 ## 릴리스 상태
 
-**현재 안정 버전: [v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 설치 프로그램 및 실행 가능한 소스**
+**현재 안정 버전: [v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 설치 프로그램 및 실행 가능한 소스**
 
 로컬 버전 보호, 저장 지점과 타임라인, Diff, 미리 보기 복원과 취소, 임시 보관, GitHub Private 백업, Electron UI, 통합 Agent Events CLI는 구현 및 검증되었습니다. Codex/Claude Code는 위 지시문으로 소스를 배포할 수 있으며, 네이티브 Agent 자동 설치 프로그램은 다음 단계입니다. Hook 템플릿과 검증 범위도 제공합니다. [최종 검증 기록](docs/FINAL_VALIDATION.md)을 확인하세요.
 

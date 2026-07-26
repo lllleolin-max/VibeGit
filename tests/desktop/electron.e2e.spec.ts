@@ -29,6 +29,11 @@ test('built desktop app completes save → diff → restore → undo without a w
     page.on('pageerror', (error) => pageErrors.push(error.message))
     page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
     await page.waitForFunction(() => document.documentElement.dataset.vibegitReady === 'true')
+    // The code-diff assertions below must not inherit a user's persisted
+    // plain-language presentation preference from a prior desktop session.
+    await page.evaluate(() => localStorage.setItem('vibegit.change-presentation', 'code'))
+    await page.reload()
+    await page.waitForFunction(() => document.documentElement.dataset.vibegitReady === 'true')
     const health = await page.evaluate(async () => await window.vibegit.health())
     expect(health).toMatchObject({ ok: true, data: { ready: true, database: 'ok', git: 'ok' } })
     expect(await page.locator('body').innerText()).toContain('VibeGit')

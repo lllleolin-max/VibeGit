@@ -10,6 +10,7 @@ export interface AgentEventResult {
   event: AgentEventRecord
   checkpoint?: Checkpoint
   changed: boolean
+  summaryRequired?: boolean
 }
 
 interface StoredAgentSummary {
@@ -28,6 +29,16 @@ function summaryLabel(summary: FeatureChangeSummary): string {
     summary.removed.length ? `移除 ${summary.removed.length} 项` : ''
   ].filter(Boolean)
   return parts.join('、')
+}
+
+function automaticSummary(agent: AgentEvent['agent']): FeatureChangeSummary {
+  const label = agent === 'codex' ? 'Codex' : 'Claude Code'
+  return {
+    overview: `VibeGit automatically recorded this checkpoint because ${label} did not provide a plain-language feature summary.`,
+    added: [],
+    improved: [],
+    removed: []
+  }
 }
 
 export function adaptHookEvent(input: unknown, agent: AgentEvent['agent']): AgentEvent | undefined {
@@ -49,7 +60,8 @@ export function adaptHookEvent(input: unknown, agent: AgentEvent['agent']): Agen
     ...(typeof record.session_id === 'string' ? { sessionId: record.session_id } : {}),
     ...(sourceId ? { eventId: sourceId } : {}),
     ...(eventName === 'UserPromptSubmit' && typeof record.prompt === 'string' ? { taskText: record.prompt } : {}),
-    ...(eventName === 'StopFailure' ? { success: false } : {})
+    ...(eventName === 'StopFailure' ? { success: false } : {}),
+    ...(typeof record.stop_hook_active === 'boolean' ? { stopHookActive: record.stop_hook_active } : {})
   }
 }
 
@@ -102,7 +114,7 @@ export class AgentEventService {
       candidates = (await Promise.all(files.filter((file) => file.endsWith('.json')).map(async (file) => {
         try {
           const record = JSON.parse(await readFile(join(this.summaryDirectory(), file), 'utf8')) as StoredAgentSummary
-          return record.projectPath === projectPath && record.agent === agent && (!sessionId || !record.sessionId || record.sessionId === sessionId)
+          return record.projectPath === projectPath && record.agent === agent && (sessionId ? record.sessionId === sessionId : !record.sessionId)
             ? { path: join(this.summaryDirectory(), file), record }
             : undefined
         } catch { return undefined }
@@ -114,7 +126,7 @@ export class AgentEventService {
     return selected.record.summary
   }
 
-  async handle(input: AgentEvent): Promise<AgentEventResult> {
+  async handle(input: AgentEvent, options: { enforceSummary?: boolean } = {}): Promise<AgentEventResult> {
     let projectPath: string
     try {
       projectPath = await realpath(resolve(input.projectPath))
@@ -202,6 +214,27 @@ export class AgentEventService {
       const started = this.database.getLatestAgentStart(project.id, input.agent, input.sessionId)
       const resolvedTaskText = taskText ?? started?.taskText
       const featureSummary = await this.consumeSummary(project.path, input.agent, input.sessionId)
+      if (!featureSummary && options.enforceSummary && !input.stopHookActive && await this.checkpoints.hasPendingChanges(project.id)) {
+        if (reservationId) this.database.deleteAgentEventReservation(reservationId)
+        return {
+          event: {
+            id: randomUUID(),
+            projectId: project.id,
+            event: input.event,
+            agent: input.agent,
+            ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+            ...(input.eventId ? { sourceEventId: input.eventId } : {}),
+            ...(resolvedTaskText ? { taskText: resolvedTaskText } : {}),
+            createdAt: input.timestamp,
+            ...(input.success !== undefined ? { success: input.success } : {}),
+            message: '检测到文件变化，正在等待 Agent 生成 VibeGit 功能说明'
+          },
+          changed: false,
+          summaryRequired: true
+        }
+      }
+      const resolvedFeatureSummary = featureSummary ?? automaticSummary(input.agent)
+      const featureSummarySource = featureSummary ? 'agent' : 'auto-generated'
       const checkpoint = await this.checkpoints.create({
         projectId: project.id,
         type: 'post_agent',
@@ -209,17 +242,14 @@ export class AgentEventService {
         agent: input.agent,
         ...(input.sessionId ? { agentSessionId: input.sessionId } : {}),
         ...(resolvedTaskText ? { taskText: resolvedTaskText } : {}),
-        summary: featureSummary ? summaryLabel(featureSummary) : input.success === false
-          ? '任务未成功结束，已保存检测到的当前修改'
-          : input.success === true
-            ? 'Agent 任务完成后自动保存'
-            : 'Agent 本轮响应结束后自动保存；任务成功状态未知',
+        summary: summaryLabel(resolvedFeatureSummary),
         testStatus: input.testStatus ?? 'unknown',
         metadata: {
           source: 'agent-event',
           eventTimestamp: input.timestamp,
           ...(input.success !== undefined ? { success: input.success } : {}),
-          ...(featureSummary ? { featureSummary } : {}),
+          featureSummary: resolvedFeatureSummary,
+          featureSummarySource,
           ...(started ? { startEventId: started.id, preAgentCheckpointId: started.checkpointId } : {})
         }
       })

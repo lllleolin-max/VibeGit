@@ -169,7 +169,7 @@ VibeGit 的默认立场是：**先保护，再操作。**
 
 ## 当前发布状态
 
-**当前稳定版本：[v0.1.2](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安装包与可运行源码**
+**当前稳定版本：[v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安装包与可运行源码**
 
 已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
 
