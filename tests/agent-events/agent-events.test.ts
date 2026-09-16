@@ -1,6 +1,6 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TestSandbox } from '../helpers'
 import { cleanupSandbox, createSandbox, writeProjectFile } from '../helpers'
 import { parseAgentEvent, parseRecordAgentSummary } from '@vibegit/shared'
@@ -121,6 +121,29 @@ describe('Agent events', () => {
     })
     expect(ended.checkpoint?.metadata).toMatchObject({ featureSummarySource: 'auto-generated' })
     expect(ended.checkpoint?.summary).not.toContain('Old session summary')
+  })
+
+  it('redacts queued summaries and retains them when checkpoint creation fails', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'before\n')
+    await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    await sandbox.service.recordAgentSummary({
+      projectPath: sandbox.projectPath,
+      agent: 'codex', sessionId: 'retry-summary',
+      summary: { overview: `Updated API_KEY=${fakeSecret()}`, added: [`access_token=${fakeSecret()}`], improved: [], removed: [] }
+    })
+    const directory = join(sandbox.dataDirectory, 'agent-change-summaries')
+    const queued = await Promise.all((await readdir(directory)).map((name) => readFile(join(directory, name), 'utf8')))
+    expect(queued.join('')).not.toContain(fakeSecret())
+    await writeProjectFile(sandbox, 'app.ts', 'after\n')
+    const create = vi.spyOn(sandbox.service.checkpoints, 'create').mockRejectedValueOnce(new Error('Temporary checkpoint failure'))
+    const event = { event: 'task-end' as const, agent: 'codex' as const, projectPath: sandbox.projectPath, sessionId: 'retry-summary', timestamp: new Date().toISOString() }
+    await expect(sandbox.service.handleAgentEvent(event)).rejects.toThrow('Temporary checkpoint failure')
+    create.mockRestore()
+    const retried = await sandbox.service.handleAgentEvent(event)
+    expect(retried.checkpoint?.metadata).toMatchObject({ featureSummarySource: 'agent' })
+    expect(JSON.stringify(retried.checkpoint)).not.toContain(fakeSecret())
+    expect(retried.checkpoint?.summary).toContain('Updated')
   })
 
   it('removes only VibeGit records when a protected project is removed', async () => {

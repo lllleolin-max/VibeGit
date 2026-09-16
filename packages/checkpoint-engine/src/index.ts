@@ -42,11 +42,12 @@ function isPathInside(root: string, target: string): boolean {
   return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}${sep}`)
 }
 
+function normalizeForVolume(value: string): string {
+  const normalized = value.replaceAll('\\', '/').replace(/\/$/, '')
+  return process.platform === 'win32' || process.platform === 'darwin' ? normalized.normalize('NFC').toLocaleLowerCase('en-US') : normalized
+}
+
 function pathCollides(untracked: readonly string[], targetPath: string): string | undefined {
-  const normalizeForVolume = (value: string): string => {
-    const normalized = value.replaceAll('\\', '/').replace(/\/$/, '')
-    return process.platform === 'win32' || process.platform === 'darwin' ? normalized.normalize('NFC').toLocaleLowerCase('en-US') : normalized
-  }
   const normalized = normalizeForVolume(targetPath)
   return untracked.find((candidate) => {
     const item = normalizeForVolume(candidate)
@@ -292,24 +293,27 @@ export class CheckpointEngine {
     const trackedPaths = new Set(tracked)
     const files: RestoreImpactFile[] = []
 
-    for (const change of changes) {
-      const absolute = this.git.resolveProjectFile(project.path, change.path)
+    const changedPaths = new Set(changes.flatMap((change) =>
+      change.previousPath ? [change.previousPath, change.path] : [change.path]
+    ))
+    for (const path of changedPaths) {
+      const absolute = this.git.resolveProjectFile(project.path, path)
       const exists = await this.git.fileExists(absolute)
-      const conflict = pathCollides(allUntracked, change.path)
-      if (targetPaths.has(change.path)) {
+      const conflict = pathCollides(allUntracked, path)
+      if (targetPaths.has(path)) {
         if (conflict) {
-          files.push({ path: change.path, action: 'move_to_recovery', reason: `当前未保存文件“${conflict}”会先移入恢复区` })
+          files.push({ path, action: 'move_to_recovery', reason: `当前未保存文件“${conflict}”会先移入恢复区` })
         } else {
           files.push({
-            path: change.path,
+            path,
             action: exists ? 'overwrite' : 'add',
             reason: exists ? '用所选保存点中的版本覆盖' : '从所选保存点恢复这个文件'
           })
         }
-      } else if (trackedPaths.has(change.path)) {
-        files.push({ path: change.path, action: 'remove', reason: '所选保存点中不存在；当前内容已存入保险点' })
+      } else if (trackedPaths.has(path)) {
+        files.push({ path, action: 'remove', reason: '所选保存点中不存在；当前内容已存入保险点' })
       } else {
-        files.push({ path: change.path, action: 'preserve', reason: '当前新增文件不会被删除' })
+        files.push({ path, action: 'preserve', reason: '当前新增文件不会被删除' })
       }
     }
     for (const path of allUntracked) {
@@ -512,6 +516,15 @@ export class CheckpointEngine {
     let undoMutationCompleted = false
     let undoAttemptRestoreId: string | undefined
     try {
+      const uncapturedConflicts = manifest.conflicts.filter((entry) => !entry.capturedInInsurance)
+      // Ignored originals exist only in recovery storage. Validate every one
+      // before restoring the insurance checkpoint, so missing/corrupt content
+      // leaves the current worktree untouched and the undo remains retryable.
+      for (const entry of uncapturedConflicts) {
+        const savedOriginal = this.safeJoin(original.recoveryDirectory, entry.recoveryRelativePath)
+        if (!(await this.git.fileExists(savedOriginal))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
+        await this.verifyRecoveryEntry(savedOriginal, entry)
+      }
       const preview = await this.prepareRestoreLocked(original.projectId, original.insuranceCheckpointId)
       undoAttemptRestoreId = this.database.getRestoreByToken(preview.token)?.record.id
       undoExecutionStarted = true
@@ -523,7 +536,6 @@ export class CheckpointEngine {
         randomUUID()
       )
 
-      const uncapturedConflicts = manifest.conflicts.filter((entry) => !entry.capturedInInsurance)
       const restoredConflictPaths = new Set(uncapturedConflicts.map((entry) => entry.path))
       for (const entry of uncapturedConflicts) {
         const current = this.git.resolveProjectFile(project.path, entry.path)
@@ -592,8 +604,14 @@ export class CheckpointEngine {
       this.git.listTree(project.path, checkpoint.gitObjectId),
       this.git.listTree(project.path, base.gitObjectId)
     ])
-    const basePaths = new Set(baseEntries.map((entry) => entry.path))
-    const addedPaths = shelfEntries.filter((entry) => entry.type === 'blob' && !basePaths.has(entry.path)).map((entry) => entry.path)
+    // Include directories: a draft file can replace a baseline directory that
+    // is already restored now. Preserve it without scanning the whole baseline
+    // for every shelf entry in large projects.
+    const basePaths = new Set(baseEntries.flatMap((entry) => {
+      const parts = normalizeForVolume(entry.path).split('/')
+      return parts.map((_, index) => parts.slice(0, index + 1).join('/'))
+    }))
+    const addedPaths = shelfEntries.filter((entry) => entry.type === 'blob' && !basePaths.has(normalizeForVolume(entry.path))).map((entry) => entry.path)
     for (const path of addedPaths) {
       const source = this.git.resolveProjectFile(project.path, path)
       const destination = this.safeJoin(restore.recoveryDirectory, `shelf-added/${path}`)

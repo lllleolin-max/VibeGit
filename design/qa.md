@@ -1,5 +1,19 @@
 # Design QA
 
+## 2026-09-15：审查修复后的验收
+
+已复核最终 Electron 时间线、代码 Diff、首次使用、开启保护和恢复完成截图，并运行同一套验收流程验证打包后的 `VibeGit.exe`：2/2 通过。
+
+- 原有项目名、保护状态、保存按钮和时间线层级清楚，本轮无需重做视觉体系。
+- 详情增加功能/代码切换入口，缺摘要时仍能直接核对文件变化。
+- 已由交互回归验证：旧异步结果不会串到新项目或详情；备份失败不冒充安全；未保护项目不显示已保存；模态框与菜单具备键盘导航及执行期间关闭保护。
+- 浏览器兼容 API 不支持的操作现在提供明确错误；真实文件夹选择和初始化由 Electron 流程验证。
+- 不把这些检查等同于完整可访问性认证。屏幕阅读器、高对比度、200% 缩放和多语言长文案仍需专门人工验收。
+
+截图：`test-results/vibegit-timeline.png`、`vibegit-diff.png`、`vibegit-empty.png`、`vibegit-first-use-protected.png`、`vibegit-desktop-e2e.png`。完整范围见 [本轮审查记录](../docs/PRODUCT_AUDIT_2026-09-15.md)。
+
+## 2026-07-12 历史记录
+
 检查对象：构建后的真实 Electron 应用。2026-07-12 的 Playwright 运行在 1920 × 1227 视口生成 `test-results/vibegit-empty.png`、`vibegit-timeline.png`、`vibegit-diff.png`、`vibegit-desktop-e2e.png` 和 `vibegit-first-use-protected.png`。
 
 ## 结论

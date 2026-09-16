@@ -23,6 +23,12 @@ const service = new VibeGitService({
 
 let origin = ''
 
+function desktopOnly(): never {
+  throw new VibeGitError('BROWSER_DESKTOP_REQUIRED', '这项操作需要在 VibeGit 桌面版中完成', {
+    remediation: '请启动 VibeGit 桌面版，再选择本地记录位置或操作应用窗口。'
+  })
+}
+
 function argument<T>(args: unknown[], index: number): T {
   return args[index] as T
 }
@@ -70,19 +76,20 @@ const actions: Record<keyof VibeGitApi, (args: unknown[]) => unknown | Promise<u
   retrieveShelf: (args) => service.retrieveShelf(argument<string>(args, 0)),
   githubStatus: () => service.githubStatus(),
   githubAuthorize: () => service.authorizeGitHub(),
+  githubAuthorizationStatus: () => service.githubAuthorizationStatus(),
   githubScan: (args) => service.scanSensitiveFiles(argument<string>(args, 0)),
   githubCreatePrivate: (args) => service.createPrivateRepository(argument<CreatePrivateRepositoryInput>(args, 0)),
   githubConnect: (args) => service.connectRemote(argument<ConnectRemoteInput>(args, 0)),
   githubPush: (args) => service.pushToGitHub(argument<string>(args, 0)),
   githubIgnoreRisk: (args) => service.ignoreSensitiveRisk(argument<string>(args, 0), argument<SensitiveRisk>(args, 1)),
-  minimizeWindow: () => true,
-  toggleMaximizeWindow: () => true,
-  closeWindow: () => true,
+  minimizeWindow: desktopOnly,
+  toggleMaximizeWindow: desktopOnly,
+  closeWindow: desktopOnly,
   agentStatus: () => service.agentStatus(),
   listAgentEvents: (args) => service.listAgentEvents(argument<string>(args, 0)),
   getSettings: () => service.settings,
-  selectDataDirectory: () => null,
-  setDataDirectory: () => ({ dataDirectory: service.settings.dataDirectory, restartRequired: false }),
+  selectDataDirectory: desktopOnly,
+  setDataDirectory: desktopOnly,
   checkEnvironment: async () => {
     const agents = await service.agentStatus()
     return {
@@ -114,11 +121,20 @@ async function readInvocation(request: IncomingMessage): Promise<{ method: keyof
     if (bytes > 1_048_576) throw new VibeGitError('REQUEST_TOO_LARGE', '请求内容过大')
     chunks.push(buffer)
   }
-  const parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>
-  if (typeof parsed.method !== 'string' || !(parsed.method in actions) || !Array.isArray(parsed.args)) {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  } catch {
     throw new VibeGitError('INVALID_BROWSER_REQUEST', '本机界面发送了无效请求')
   }
-  return { method: parsed.method as keyof VibeGitApi, args: parsed.args }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new VibeGitError('INVALID_BROWSER_REQUEST', '本机界面发送了无效请求')
+  }
+  const invocation = parsed as Record<string, unknown>
+  if (typeof invocation.method !== 'string' || !Object.hasOwn(actions, invocation.method) || !Array.isArray(invocation.args)) {
+    throw new VibeGitError('INVALID_BROWSER_REQUEST', '本机界面发送了无效请求')
+  }
+  return { method: invocation.method as keyof VibeGitApi, args: invocation.args }
 }
 
 async function handleApi(request: IncomingMessage, response: ServerResponse): Promise<void> {

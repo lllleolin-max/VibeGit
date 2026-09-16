@@ -1,8 +1,11 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { appendFile, chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { chmod, lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import { basename, extname, join, resolve } from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 import type {
+  GitHubAuthorizationState,
   GitHubCliStatus,
   GitHubOnboardingResult,
   GitHubSyncResult,
@@ -17,6 +20,7 @@ import { CheckpointEngine } from '@vibegit/checkpoint-engine'
 const DEFAULT_GH_TIMEOUT = 30_000
 const DEFAULT_GH_AUTH_TIMEOUT = 10 * 60_000
 const MAX_FILE_BYTES = 10 * 1024 * 1024
+const MAX_PROCESS_OUTPUT_BYTES = 4 * 1024 * 1024
 export const VIBEGIT_REMOTE_NAME = 'vibegit'
 const VIBEGIT_SSH_KEY_TITLE = 'VibeGit backup key'
 
@@ -29,6 +33,7 @@ export interface GhResult {
 export interface GhOptions {
   allowExitCodes?: number[]
   timeoutMs?: number
+  onOutput?: (chunk: string) => void
 }
 
 export type GhExecutor = (
@@ -73,13 +78,9 @@ function literalGitignoreRule(path: string): string {
 }
 
 function githubRepositorySlug(remoteUrl: string): string | undefined {
-  const normalized = remoteUrl.trim().replace(/\.git$/i, '').replace(/\/$/, '')
-  const match = normalized.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/|ssh:\/\/git@ssh\.github\.com:443\/)([A-Za-z0-9-]+\/[A-Za-z0-9._-]+)$/i)
-  return match?.[1]
-}
-
-function isVibeGitSshRemote(remoteUrl: string): boolean {
-  return /^ssh:\/\/git@ssh\.github\.com:443\/[A-Za-z0-9-]+\/[A-Za-z0-9._-]+\.git$/i.test(remoteUrl.trim())
+  const normalized = remoteUrl.trim().replace(/\/$/, '').replace(/\.git$/i, '')
+  const match = normalized.match(/^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com(?::22)?\/|ssh:\/\/git@ssh\.github\.com:443\/)([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\/([A-Za-z0-9._-]+))$/i)
+  return match && match[2] !== '.' && match[2] !== '..' ? match[1] : undefined
 }
 
 function managedSshRemote(repository: string): string {
@@ -96,13 +97,37 @@ function publicKeyHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await stat(path)
-    return true
-  } catch {
-    return false
+function boundedOutput(onLimit: () => void): { stdout: Buffer[]; stderr: Buffer[]; append: (target: Buffer[], chunk: Buffer) => void } {
+  let bytes = 0
+  let exceeded = false
+  return {
+    stdout: [],
+    stderr: [],
+    append(target, chunk) {
+      if (exceeded) return
+      bytes += chunk.length
+      if (bytes > MAX_PROCESS_OUTPUT_BYTES) {
+        exceeded = true
+        onLimit()
+        return
+      }
+      target.push(chunk)
+    }
   }
+}
+
+async function managedKeyFileExists(path: string): Promise<boolean> {
+  const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  })
+  if (!info) return false
+  if (!info.isFile() || info.nlink !== 1) {
+    throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 密钥不是独立的普通文件，已停止操作', {
+      remediation: '请检查 VibeGit 数据目录中的 ssh 文件夹；不会修改链接指向的密钥文件。'
+    })
+  }
+  return true
 }
 
 function risk(path: string, kind: SensitiveRisk['kind'], message: string, ignoreSuggestion?: string): SensitiveRisk {
@@ -221,13 +246,13 @@ function decodeTextForScan(bytes: Buffer): string | undefined {
 function contentRisks(path: string, content: string): SensitiveRisk[] {
   const patterns: Array<{ kind: SensitiveRisk['kind']; pattern: RegExp; message: string }> = [
     { kind: 'lfs_pointer', pattern: /^version https:\/\/git-lfs\.github\.com\/spec\/v1\r?\noid sha256:[0-9a-f]{64}\r?\nsize \d+/m, message: '检测到 Git LFS 指针；真实大文件尚未经过安全扫描' },
-    { kind: 'private_key', pattern: /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/, message: '检测到私钥头部' },
+    { kind: 'private_key', pattern: /-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----/, message: '检测到私钥头部' },
     { kind: 'api_key', pattern: /\bAKIA[0-9A-Z]{16}\b/, message: '检测到疑似 AWS Access Key' },
-    { kind: 'access_token', pattern: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/, message: '检测到疑似 GitHub Token' },
+    { kind: 'access_token', pattern: /\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}\b/, message: '检测到疑似 GitHub Token' },
     { kind: 'access_token', pattern: /\bnpm_[A-Za-z0-9]{20,}\b/, message: '检测到疑似 npm Token' },
     { kind: 'access_token', pattern: /\b(?:sk|rk)-(?:live|test|proj)-[A-Za-z0-9_-]{16,}\b/, message: '检测到疑似访问令牌' },
-    { kind: 'api_key', pattern: /(?:api[_-]?key|client[_-]?secret)\s*[:=]\s*["']?[A-Za-z0-9_./+\-=]{16,}/i, message: '检测到疑似 API Key 赋值' },
-    { kind: 'access_token', pattern: /(?:access[_-]?token|refresh[_-]?token|_authToken)\s*[:=]\s*["']?[A-Za-z0-9_./+\-=]{16,}/i, message: '检测到疑似访问令牌赋值' }
+    { kind: 'api_key', pattern: /(?:api[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+\-=]{16,}/i, message: '检测到疑似 API Key 赋值' },
+    { kind: 'access_token', pattern: /(?:access[_-]?token|refresh[_-]?token|_authToken)["']?\s*[:=]\s*["']?[A-Za-z0-9_./+\-=]{16,}/i, message: '检测到疑似访问令牌赋值' }
   ]
   return patterns
     .filter(({ pattern }) => pattern.test(content))
@@ -284,6 +309,8 @@ export class GitHubProvider {
   readonly scanner: SensitiveFileScanner
   private readonly executor: GitHubProviderOptions['executor']
   private readonly systemExecutor: GitHubProviderOptions['systemExecutor']
+  private authorizationState: GitHubAuthorizationState = { phase: 'idle', message: '尚未开始 GitHub 授权' }
+  private authorizationPromise: Promise<GitHubOnboardingResult> | undefined
 
   constructor(
     readonly database: VibeGitDatabase,
@@ -349,21 +376,39 @@ export class GitHubProvider {
     return undefined
   }
 
-  private async managedSshKeyReady(username: string | undefined): Promise<boolean> {
+  private async managedSshKeyReady(cwd: string, username: string | undefined): Promise<boolean> {
     if (!username || !/^[A-Za-z0-9-]+$/.test(username)) return false
     const paths = this.managedKeyPaths(username)
-    if (!(await exists(paths.privateKey)) || !(await exists(paths.publicKey))) return false
     const [metadata, publicKey] = await Promise.all([
       this.readManagedKeyMetadata(paths),
       readFile(paths.publicKey, 'utf8').catch(() => '')
     ])
     const normalized = normalizedPublicKey(publicKey)
-    return Boolean(
-      metadata &&
-      normalized &&
-      metadata.username.toLowerCase() === username.toLowerCase() &&
-      metadata.publicKeySha256 === publicKeyHash(normalized)
-    )
+    if (!metadata || !normalized || metadata.username.toLowerCase() !== username.toLowerCase() ||
+      metadata.publicKeySha256 !== publicKeyHash(normalized)) return false
+    try {
+      await this.validateManagedKeyPair(cwd, paths, normalized)
+      // The local metadata is only a receipt, not proof that GitHub still has
+      // this key. Revoked keys must offer the repair flow before the next push.
+      return await this.githubHasPublicKey(cwd, normalized)
+    } catch {
+      return false
+    }
+  }
+
+  private async validateManagedKeyPair(cwd: string, paths: ManagedSshKeyPaths, publicKey: string): Promise<void> {
+    const [privateInfo, publicInfo] = await Promise.all([lstat(paths.privateKey), lstat(paths.publicKey)])
+    if (!privateInfo.isFile() || !publicInfo.isFile() || privateInfo.nlink !== 1 || publicInfo.nlink !== 1) {
+      throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 密钥文件类型无效，已停止操作')
+    }
+    // Derive from the private file rather than trusting a stale/replaced .pub.
+    // An explicit empty passphrase keeps this check noninteractive.
+    const derived = await this.runSystem(cwd, this.sshKeygenExecutable, ['-y', '-P', '', '-f', paths.privateKey])
+    if (normalizedPublicKey(derived.stdout) !== publicKey) {
+      throw new VibeGitError('SSH_KEY_MISMATCH', 'VibeGit SSH 私钥与公钥不匹配，已停止操作', {
+        remediation: '请保留原密钥文件并检查 VibeGit 数据目录中的 ssh 文件夹；不会覆盖或删除现有密钥。'
+      })
+    }
   }
 
   private async runSystem(
@@ -402,8 +447,13 @@ export class GitHubProvider {
         }))
         return
       }
-      const stdout: Buffer[] = []
-      const stderr: Buffer[] = []
+      const { stdout, stderr, append } = boundedOutput(() => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        child.kill()
+        reject(new VibeGitError('SSH_OUTPUT_LIMIT', 'SSH 工具输出超过安全限制，已停止操作'))
+      })
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
@@ -413,8 +463,8 @@ export class GitHubProvider {
           retryable: true
         }))
       }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+      child.stdout.on('data', (chunk: Buffer) => append(stdout, chunk))
+      child.stderr.on('data', (chunk: Buffer) => append(stderr, chunk))
       child.on('error', (error) => {
         if (settled) return
         settled = true
@@ -474,10 +524,12 @@ export class GitHubProvider {
   private async ensureManagedSshKey(cwd: string, username: string): Promise<{ created: boolean }> {
     const paths = this.managedKeyPaths(username)
     await mkdir(paths.directory, { recursive: true, mode: 0o700 })
-    const [hasPrivateKey, hasPublicKey] = await Promise.all([exists(paths.privateKey), exists(paths.publicKey)])
+    const [hasPrivateKey, hasPublicKey] = await Promise.all([
+      managedKeyFileExists(paths.privateKey), managedKeyFileExists(paths.publicKey)
+    ])
     if (!hasPrivateKey && hasPublicKey) {
       throw new VibeGitError('SSH_KEY_INCOMPLETE', '检测到不完整的 VibeGit SSH 密钥，已停止操作', {
-        remediation: '请在设置中移除这组不完整密钥后重新连接 GitHub。'
+        remediation: '请检查 VibeGit 数据目录中的 ssh 文件夹并恢复原私钥；不会覆盖或删除现有密钥。'
       })
     }
 
@@ -489,7 +541,7 @@ export class GitHubProvider {
       created = true
     } else if (!hasPublicKey) {
       await this.protectManagedKeyFiles(cwd, paths)
-      const derived = await this.runSystem(cwd, this.sshKeygenExecutable, ['-y', '-f', paths.privateKey], 60_000)
+      const derived = await this.runSystem(cwd, this.sshKeygenExecutable, ['-y', '-P', '', '-f', paths.privateKey], 60_000)
       const publicKey = normalizedPublicKey(derived.stdout)
       if (!publicKey) throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 密钥格式无效，已停止操作')
       await writeFile(paths.publicKey, `${publicKey} vibegit-backup\n`, { encoding: 'utf8', mode: 0o644 })
@@ -498,6 +550,7 @@ export class GitHubProvider {
     await this.protectManagedKeyFiles(cwd, paths)
     const publicKey = normalizedPublicKey(await readFile(paths.publicKey, 'utf8'))
     if (!publicKey) throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 公钥格式无效，已停止操作')
+    await this.validateManagedKeyPair(cwd, paths, publicKey)
 
     let registered = await this.githubHasPublicKey(cwd, publicKey)
     if (!registered) {
@@ -511,7 +564,7 @@ export class GitHubProvider {
     }
     if (!registered) {
       throw new VibeGitError('GITHUB_SSH_KEY_CONFLICT', '这把 SSH 公钥已被其他 GitHub 账户使用，未连接该账户', {
-        remediation: '请在 GitHub SSH keys 设置中确认密钥归属，或移除本机这把 VibeGit 专用密钥后重试。'
+        remediation: '请在 GitHub SSH keys 设置中确认密钥归属，并连接拥有这把密钥的账户；不会删除现有密钥。'
       })
     }
 
@@ -527,22 +580,36 @@ export class GitHubProvider {
 
   private sshTransport(username: string): GitSshTransport {
     const paths = this.managedKeyPaths(username)
-    const quote = (path: string): string => {
-      if (path.includes('"') || path.includes('\n') || path.includes('\r')) {
+    const normalize = (path: string): string => {
+      if (/[\0\r\n]/.test(path)) {
         throw new VibeGitError('SSH_KEY_PATH_UNSAFE', 'VibeGit SSH 密钥路径不安全，已停止连接')
       }
-      return `"${path.replaceAll('\\', '/')}"`
+      return process.platform === 'win32' ? path.replaceAll('\\', '/') : path
     }
+    // GIT_SSH_COMMAND is interpreted by Git's POSIX shell, including on Windows.
+    // Double quotes still expand $() and backticks from a user-selected folder.
+    const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+    const knownHosts = normalize(paths.knownHosts).replaceAll('\\', '\\\\').replaceAll('"', '\\"')
     return {
       sshCommand: [
         'ssh',
-        '-i', quote(paths.privateKey),
+        '-i', quote(normalize(paths.privateKey)),
         '-o', 'IdentitiesOnly=yes',
         '-o', 'BatchMode=yes',
         '-o', 'StrictHostKeyChecking=accept-new',
-        '-o', `UserKnownHostsFile=${quote(paths.knownHosts)}`
+        '-o', quote(`UserKnownHostsFile="${knownHosts}"`)
       ].join(' ')
     }
+  }
+
+  private requireManagedTransport(status: GitHubCliStatus): GitSshTransport {
+    if (!status.authenticated || !status.username || !status.sshKeyReady) {
+      throw new VibeGitError('VIBEGIT_SSH_KEY_UNAVAILABLE', 'VibeGit 专用 SSH 密钥尚未为当前 GitHub 账户准备好', {
+        remediation: '在 GitHub 备份窗口点击“连接或修复 GitHub”后重试。',
+        retryable: true
+      })
+    }
+    return this.sshTransport(status.username)
   }
 
   private async runGh(cwd: string, args: string[], options: GhOptions = {}): Promise<GhResult> {
@@ -567,8 +634,13 @@ export class GitHubProvider {
         }))
         return
       }
-      const stdout: Buffer[] = []
-      const stderr: Buffer[] = []
+      const { stdout, stderr, append } = boundedOutput(() => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        child.kill()
+        reject(new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止操作'))
+      })
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
@@ -578,8 +650,8 @@ export class GitHubProvider {
           remediation: '检查网络连接后重试；本地保存点未受影响。'
         }))
       }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+      child.stdout.on('data', (chunk: Buffer) => append(stdout, chunk))
+      child.stderr.on('data', (chunk: Buffer) => append(stderr, chunk))
       child.on('error', (error) => {
         if (settled) return
         settled = true
@@ -614,7 +686,32 @@ export class GitHubProvider {
 
   private async runGhInteractive(cwd: string, args: string[], timeoutMs = DEFAULT_GH_AUTH_TIMEOUT): Promise<GhResult> {
     const environment = this.ghEnvironment(true)
-    if (this.executor) return await this.executor(cwd, [...args], { timeoutMs }, environment)
+    let outputTail = ''
+    const onOutput = (chunk: string): void => {
+      // gh writes this prompt to stderr, potentially across multiple chunks.
+      // Retain only a bounded tail and publish the device code, never CLI text,
+      // arbitrary URLs, tokens, or account credentials.
+      outputTail = (outputTail + chunk).slice(-8192)
+      const output = stripVTControlCharacters(outputTail)
+      const match = output.match(/one-time code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})(?![A-Z0-9-])/i)
+      if (match && this.authorizationState.phase === 'authorizing') {
+        this.authorizationState = {
+          phase: 'authorizing',
+          message: '请打开 GitHub 授权页面，输入一次性代码并确认授权',
+          verificationUri: 'https://github.com/login/device',
+          userCode: match[1]!.toUpperCase()
+        }
+      }
+    }
+    const authorizationFailed = (): VibeGitError => new VibeGitError('GH_AUTHORIZATION_FAILED', 'GitHub 授权未完成', {
+      remediation: '请重新点击“连接 GitHub”，在浏览器中完成授权后返回应用。',
+      retryable: true
+    })
+    if (this.executor) {
+      const result = await this.executor(cwd, [...args], { timeoutMs, onOutput }, environment)
+      if (result.exitCode !== 0) throw authorizationFailed()
+      return result
+    }
     return await new Promise<GhResult>((resolvePromise, reject) => {
       let settled = false
       let child
@@ -624,8 +721,8 @@ export class GitHubProvider {
           shell: false,
           windowsHide: true,
           env: environment,
-          // The command line below is fully specified: no terminal prompt is
-          // expected. gh itself opens the user's browser for consent.
+          // All prompts are specified. Without a TTY gh emits its device URL
+          // instead of opening a browser; the UI exposes that fixed URL.
           stdio: ['ignore', 'pipe', 'pipe']
         })
       } catch (error) {
@@ -635,8 +732,13 @@ export class GitHubProvider {
         }))
         return
       }
-      const stdout: Buffer[] = []
-      const stderr: Buffer[] = []
+      const { stdout, stderr, append } = boundedOutput(() => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        child.kill()
+        reject(new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止授权等待'))
+      })
       const timer = setTimeout(() => {
         if (settled) return
         settled = true
@@ -646,8 +748,8 @@ export class GitHubProvider {
           retryable: true
         }))
       }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-      child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
+      child.stdout.on('data', (chunk: Buffer) => { append(stdout, chunk); if (!settled) onOutput(chunk.toString('utf8')) })
+      child.stderr.on('data', (chunk: Buffer) => { append(stderr, chunk); if (!settled) onOutput(chunk.toString('utf8')) })
       child.on('error', (error) => {
         if (settled) return
         settled = true
@@ -668,11 +770,7 @@ export class GitHubProvider {
           stderr: Buffer.concat(stderr).toString('utf8')
         }
         if (result.exitCode !== 0) {
-          reject(new VibeGitError('GH_AUTHORIZATION_FAILED', 'GitHub 授权未完成', {
-            detail: redactSecrets(result.stderr.trim() || result.stdout.trim()),
-            remediation: '请重新点击“连接 GitHub”，在浏览器中完成授权后返回应用。',
-            retryable: true
-          }))
+          reject(authorizationFailed())
           return
         }
         resolvePromise(result)
@@ -695,17 +793,34 @@ export class GitHubProvider {
     }
     const user = await this.runGh(cwd, ['api', '--hostname', 'github.com', 'user', '--jq', '.login'], { allowExitCodes: [0, 1] })
     const username = user.exitCode === 0 && /^[A-Za-z0-9-]+$/.test(user.stdout.trim()) ? user.stdout.trim() : undefined
-    const sshKeyReady = await this.managedSshKeyReady(username)
+    const sshKeyReady = await this.managedSshKeyReady(cwd, username)
     return {
       installed: true,
       authenticated: true,
       ...(username ? { username } : {}),
       sshKeyReady,
-      message: sshKeyReady ? 'GitHub 已连接，VibeGit 专用 SSH 密钥已准备好' : 'GitHub 已连接，尚未准备 VibeGit 专用 SSH 密钥'
+      message: sshKeyReady ? 'GitHub 已连接，VibeGit 专用 SSH 密钥已准备好' : 'GitHub 已连接，专用 SSH 密钥尚未就绪或验证失败；请检查网络并连接或修复'
     }
   }
 
-  async authorizeAndProvisionSshKey(cwd = process.cwd()): Promise<GitHubOnboardingResult> {
+  githubAuthorizationStatus(): GitHubAuthorizationState {
+    return { ...this.authorizationState }
+  }
+
+  authorizeAndProvisionSshKey(cwd = process.cwd()): Promise<GitHubOnboardingResult> {
+    if (this.authorizationPromise) return this.authorizationPromise
+    this.authorizationState = { phase: 'authorizing', message: '正在检查 GitHub 连接并准备浏览器授权' }
+    this.authorizationPromise = this.performAuthorization(cwd).then((result) => {
+      this.authorizationState = { phase: 'complete', message: result.message }
+      return result
+    }, (error: unknown) => {
+      this.authorizationState = { phase: 'failed', message: 'GitHub 连接未完成，请检查网络或重试授权' }
+      throw error
+    }).finally(() => { this.authorizationPromise = undefined })
+    return this.authorizationPromise
+  }
+
+  private async performAuthorization(cwd: string): Promise<GitHubOnboardingResult> {
     const initial = await this.status(cwd)
     if (!initial.installed) {
       throw new VibeGitError('GH_NOT_AVAILABLE', '未安装 GitHub CLI', {
@@ -729,6 +844,7 @@ export class GitHubProvider {
       ])
     }
 
+    this.authorizationState = { phase: 'provisioning', message: '正在验证账户并准备 VibeGit 专用 SSH 密钥' }
     const authenticated = await this.status(cwd)
     if (!authenticated.authenticated || !authenticated.username) {
       throw new VibeGitError('GH_AUTHORIZATION_FAILED', 'GitHub 授权未完成', {
@@ -752,18 +868,19 @@ export class GitHubProvider {
     if (!ghStatus.authenticated) throw new VibeGitError('GH_NOT_AUTHENTICATED', 'GitHub 尚未授权', {
       remediation: '在 VibeGit 的 GitHub 备份窗口点击“连接 GitHub 并创建 SSH 密钥”。'
     })
+    this.requireManagedTransport(ghStatus)
     const account = owner ?? ghStatus.username
     if (!account || !/^[A-Za-z0-9-]+$/.test(account)) throw new VibeGitError('GITHUB_OWNER_UNKNOWN', '无法确定 GitHub 账户')
     const fullName = `${account}/${name}`
     await this.runGh(project.path, ['repo', 'create', fullName, '--private'], { timeoutMs: 60_000 })
-    const remoteUrl = ghStatus.sshKeyReady && ghStatus.username ? managedSshRemote(fullName) : `https://github.com/${fullName}.git`
+    const remoteUrl = managedSshRemote(fullName)
     await this.verifyPrivateRepository(project.path, remoteUrl)
     await this.git.setRemote(project.path, remoteUrl, VIBEGIT_REMOTE_NAME)
     this.database.updateProjectRemote(projectId, remoteUrl)
     return remoteUrl
   }
 
-  private async verifyPrivateRepository(projectPath: string, remoteUrl: string): Promise<string> {
+  private async verifyPrivateRepository(projectPath: string, remoteUrl: string): Promise<{ slug: string; status: GitHubCliStatus }> {
     const slug = githubRepositorySlug(remoteUrl)
     if (!slug) throw new VibeGitError('NOT_A_GITHUB_REMOTE', '请输入 GitHub 仓库地址')
     const ghStatus = await this.status(projectPath)
@@ -779,16 +896,18 @@ export class GitHubProvider {
         remediation: '先在 GitHub 将仓库可见性改为 Private，或让 VibeGit 创建新的私有仓库。'
       })
     }
-    return slug
+    return { slug, status: ghStatus }
   }
 
   async connect(projectId: string, remoteUrl: string): Promise<string> {
     const project = this.database.getProject(projectId)
     if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
-    await this.verifyPrivateRepository(project.path, remoteUrl)
-    await this.git.setRemote(project.path, remoteUrl, VIBEGIT_REMOTE_NAME)
-    this.database.updateProjectRemote(projectId, remoteUrl)
-    return remoteUrl
+    const verified = await this.verifyPrivateRepository(project.path, remoteUrl)
+    this.requireManagedTransport(verified.status)
+    const normalizedUrl = managedSshRemote(verified.slug)
+    await this.git.setRemote(project.path, normalizedUrl, VIBEGIT_REMOTE_NAME)
+    this.database.updateProjectRemote(projectId, normalizedUrl)
+    return normalizedUrl
   }
 
   async scan(projectId: string): Promise<SensitiveScanResult> {
@@ -808,12 +927,28 @@ export class GitHubProvider {
       throw new VibeGitError('INVALID_IGNORE_RULE', '这条风险无法自动加入忽略列表')
     }
     const gitignorePath = resolve(project.path, '.gitignore')
-    let existing = ''
-    try { existing = await readFile(gitignorePath, 'utf8') } catch { /* Create below. */ }
-    const lines = existing.split(/\r?\n/)
-    if (!lines.includes(verified.ignoreSuggestion)) {
-      const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
-      await appendFile(gitignorePath, `${prefix}${verified.ignoreSuggestion}\n`, 'utf8')
+    const unsafe = (): VibeGitError => new VibeGitError('UNSAFE_GITIGNORE', '.gitignore 不是独立的普通文件，已停止自动修改', {
+      remediation: '请手动检查 .gitignore 的链接或文件类型，再重试。'
+    })
+    const existingInfo = await lstat(gitignorePath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined
+      throw error
+    })
+    if (existingInfo && (!existingInfo.isFile() || existingInfo.nlink !== 1)) throw unsafe()
+    // Never follow a repository-controlled link to another file. Read and append
+    // through one verified handle so replacing the path cannot redirect a write.
+    const file = await open(gitignorePath, constants.O_RDWR | constants.O_CREAT | constants.O_APPEND | (constants.O_NOFOLLOW ?? 0))
+    try {
+      const [info, current] = await Promise.all([file.stat(), lstat(gitignorePath)])
+      if (!info.isFile() || info.nlink !== 1 || !current.isFile() || current.ino !== info.ino || current.dev !== info.dev) throw unsafe()
+      const existing = await file.readFile('utf8')
+      const lines = existing.split(/\r?\n/)
+      if (!lines.includes(verified.ignoreSuggestion)) {
+        const prefix = existing.length > 0 && !existing.endsWith('\n') ? '\n' : ''
+        await file.appendFile(`${prefix}${verified.ignoreSuggestion}\n`, 'utf8')
+      }
+    } finally {
+      await file.close()
     }
     return await this.scanner.scan(project.path)
   }
@@ -821,40 +956,40 @@ export class GitHubProvider {
   async push(projectId: string): Promise<GitHubSyncResult> {
     const project = this.database.getProject(projectId)
     if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
-    const remoteUrl = await this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME)
-    if (!remoteUrl) throw new VibeGitError('GITHUB_REMOTE_NOT_CONFIGURED', '尚未设置 GitHub 备份位置')
-    await this.verifyPrivateRepository(project.path, remoteUrl)
-    const ghStatus = await this.status(project.path)
-    const transport = isVibeGitSshRemote(remoteUrl)
-      ? (() => {
-          if (!ghStatus.authenticated || !ghStatus.username || !ghStatus.sshKeyReady) {
-            throw new VibeGitError('VIBEGIT_SSH_KEY_UNAVAILABLE', 'VibeGit 专用 SSH 密钥尚未为当前 GitHub 账户准备好', {
-              remediation: '在 GitHub 备份窗口点击“连接 GitHub 并创建 SSH 密钥”后重试。'
-            })
-          }
-          return this.sshTransport(ghStatus.username)
-        })()
-      : undefined
-
-    const checkpoint = await this.checkpoints.create({
-      projectId,
-      type: 'pre_sync',
-      title: 'GitHub 同步前保护点',
-      agent: 'system',
-      summary: '推送前自动保存并进行敏感文件检查',
-      allowEmpty: true
-    })
-    if (!checkpoint) throw new VibeGitError('PRE_SYNC_CHECKPOINT_FAILED', '未能创建同步前保护点')
-    const scan = await this.scanner.scan(project.path, checkpoint.gitObjectId)
-    if (scan.blocked) {
-      this.database.updateProjectSyncFailure(projectId)
-      throw new VibeGitError('SENSITIVE_FILES_BLOCKED', `发现 ${scan.risks.length} 项风险，已阻止上传`, {
-        detail: scan.risks.map((item) => `${item.path}: ${item.message}`).join('\n'),
-        remediation: '将风险文件加入 .gitignore 或移除敏感内容，重新扫描通过后再备份。'
-      })
-    }
     try {
-      await this.verifyPrivateRepository(project.path, remoteUrl)
+      const savedUrl = await this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME)
+      if (!savedUrl) throw new VibeGitError('GITHUB_REMOTE_NOT_CONFIGURED', '尚未设置 GitHub 备份位置')
+      const verified = await this.verifyPrivateRepository(project.path, savedUrl)
+      const transport = this.requireManagedTransport(verified.status)
+      // Earlier versions persisted HTTPS and ordinary SSH URLs. Route those
+      // through the same application key instead of ambient Git credentials.
+      const remoteUrl = managedSshRemote(verified.slug)
+      if (savedUrl !== remoteUrl) {
+        await this.git.setRemote(project.path, remoteUrl, VIBEGIT_REMOTE_NAME)
+        this.database.updateProjectRemote(projectId, remoteUrl)
+      }
+
+      const checkpoint = await this.checkpoints.create({
+        projectId,
+        type: 'pre_sync',
+        title: 'GitHub 同步前保护点',
+        agent: 'system',
+        summary: '推送前自动保存并进行敏感文件检查',
+        allowEmpty: true
+      })
+      if (!checkpoint) throw new VibeGitError('PRE_SYNC_CHECKPOINT_FAILED', '未能创建同步前保护点')
+      const scan = await this.scanner.scan(project.path, checkpoint.gitObjectId)
+      if (scan.blocked) {
+        throw new VibeGitError('SENSITIVE_FILES_BLOCKED', `发现 ${scan.risks.length} 项风险，已阻止上传`, {
+          detail: scan.risks.map((item) => `${item.path}: ${item.message}`).join('\n'),
+          remediation: '将风险文件加入 .gitignore 或移除敏感内容，重新扫描通过后再备份。'
+        })
+      }
+      const reverified = await this.verifyPrivateRepository(project.path, remoteUrl)
+      this.requireManagedTransport(reverified.status)
+      if (reverified.status.username !== verified.status.username) {
+        throw new VibeGitError('GITHUB_ACCOUNT_CHANGED', '扫描期间 GitHub 账户已切换，已停止上传，请重试', { retryable: true })
+      }
       // Push to the exact URL that was checked above. A mutable remote alias such
       // as `origin` could otherwise be changed between the visibility check and
       // the network operation.

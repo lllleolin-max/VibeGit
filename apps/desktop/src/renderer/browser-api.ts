@@ -1,7 +1,6 @@
 import {
   VibeGitError,
   fail,
-  ok,
   type ApiResult,
   type VibeGitApi
 } from '@vibegit/shared'
@@ -21,8 +20,17 @@ async function invoke<T>(method: keyof VibeGitApi, args: unknown[] = []): Promis
     }
     return await response.json() as ApiResult<T>
   } catch (error) {
-    return fail(error)
+    return fail(error instanceof VibeGitError ? error : new VibeGitError('BROWSER_API_UNAVAILABLE', '本机 VibeGit 服务暂时无法访问', {
+      remediation: '请确认启动窗口仍在运行，然后刷新页面重试。',
+      retryable: true
+    }))
   }
+}
+
+function desktopWindowOnly(): Promise<ApiResult<boolean>> {
+  return Promise.resolve(fail(new VibeGitError('BROWSER_WINDOW_CONTROL_UNAVAILABLE', '浏览器兼容模式不支持桌面窗口操作', {
+    remediation: '请使用浏览器自身的窗口按钮，或启动 VibeGit 桌面版。'
+  })))
 }
 
 const browserWindow = window as unknown as Window & { vibegit?: VibeGitApi }
@@ -52,14 +60,15 @@ if (!browserWindow.vibegit) {
     retrieveShelf: (shelfId) => invoke('retrieveShelf', [shelfId]),
     githubStatus: () => invoke('githubStatus'),
     githubAuthorize: () => invoke('githubAuthorize'),
+    githubAuthorizationStatus: () => invoke('githubAuthorizationStatus'),
     githubScan: (projectId) => invoke('githubScan', [projectId]),
     githubCreatePrivate: (input) => invoke('githubCreatePrivate', [input]),
     githubConnect: (input) => invoke('githubConnect', [input]),
     githubPush: (projectId) => invoke('githubPush', [projectId]),
     githubIgnoreRisk: (projectId, risk) => invoke('githubIgnoreRisk', [projectId, risk]),
-    minimizeWindow: () => Promise.resolve(ok(true)),
-    toggleMaximizeWindow: () => Promise.resolve(ok(true)),
-    closeWindow: () => Promise.resolve(ok(true)),
+    minimizeWindow: desktopWindowOnly,
+    toggleMaximizeWindow: desktopWindowOnly,
+    closeWindow: desktopWindowOnly,
     agentStatus: () => invoke('agentStatus'),
     listAgentEvents: (projectId) => invoke('listAgentEvents', [projectId]),
     getSettings: () => invoke('getSettings'),

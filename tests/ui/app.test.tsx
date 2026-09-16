@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../../apps/desktop/src/renderer/App'
@@ -9,11 +9,15 @@ import type {
   AgentConnectionStatus,
   Checkpoint,
   CheckpointDiff,
+  GitHubAuthorizationState,
+  GitHubOnboardingResult,
+  GitHubSyncResult,
   HealthStatus,
   Project,
   RestorePreview,
   RestoreRecord,
   ShelvedChange,
+  SensitiveScanResult,
   VibeGitApi
 } from '@vibegit/shared'
 
@@ -49,6 +53,12 @@ const preview: RestorePreview = {
 
 function success<T>(data: T): Promise<ApiResult<T>> { return Promise.resolve({ ok: true, data }) }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((complete) => { resolve = complete })
+  return { promise, resolve }
+}
+
 function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
   const completedRestore: RestoreRecord = { id: 'restore-1', projectId: project.id, targetCheckpointId: checkpoint.id, insuranceCheckpointId: 'insurance', createdAt: new Date().toISOString(), completedAt: new Date().toISOString(), status: 'completed' }
   const undoneRestore: RestoreRecord = { id: 'restore-1', projectId: project.id, targetCheckpointId: checkpoint.id, insuranceCheckpointId: 'insurance', createdAt: new Date().toISOString(), undoneAt: new Date().toISOString(), status: 'undone' }
@@ -78,6 +88,7 @@ function mockApi(overrides: Partial<VibeGitApi> = {}): VibeGitApi {
     retrieveShelf: vi.fn(() => success<ShelvedChange>({ id: 'shelf-1', projectId: project.id, checkpointId: checkpoint.id, restoreId: 'restore-1', title: '未完成修改', createdAt: new Date().toISOString(), retrievedAt: new Date().toISOString(), status: 'retrieved' })),
     githubStatus: vi.fn(() => success({ installed: false, authenticated: false, message: '未安装' })),
     githubAuthorize: vi.fn(() => success({ username: 'test-user', sshKeyCreated: true, message: 'GitHub 已连接，已创建并注册 VibeGit 专用 SSH 密钥' })),
+    githubAuthorizationStatus: vi.fn(() => success<GitHubAuthorizationState>({ phase: 'idle', message: '' })),
     githubScan: vi.fn(() => success({ scannedAt: new Date().toISOString(), scannedFiles: 1, blocked: false, risks: [] })),
     githubCreatePrivate: vi.fn(() => success(project)),
     githubConnect: vi.fn(() => success(project)),
@@ -111,6 +122,234 @@ describe('VibeGit UI flow', () => {
     render(<App />)
     expect(await screen.findByText('先选择一个正在用 AI 开发的文件夹')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /选择项目文件夹/ })).toBeEnabled()
+  })
+
+  it('does not claim an unprotected project has been safely saved', async () => {
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([{ ...project, protectionEnabled: false }])), refreshProject: vi.fn(() => success({ ...project, protectionEnabled: false })) })
+    render(<App />)
+    expect((await screen.findAllByText('尚未开启版本保护')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('当前版本已保存')).not.toBeInTheDocument()
+  })
+
+  it('shows cached projects and the backup entry while a worktree check is still pending', async () => {
+    const pendingCheck = deferred<ApiResult<Project>>()
+    const api = mockApi({ listProjects: vi.fn(() => success([project])), refreshProject: vi.fn(() => pendingCheck.promise) })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect((await screen.findAllByText('正在检查工作区…')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('当前版本已保存')).not.toBeInTheDocument()
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(screen.getByRole('button', { name: 'GitHub 备份' })).toBeEnabled()
+    expect(api.refreshProject).toHaveBeenCalledTimes(1)
+    await act(async () => pendingCheck.resolve({ ok: true, data: { ...project, hasUnsavedChanges: true, worktreeStatus: 'checked' } }))
+    expect(screen.getAllByText('有尚未保存的修改').length).toBeGreaterThan(0)
+    expect(screen.queryByText('当前版本已保存')).not.toBeInTheDocument()
+  })
+
+  it('keeps an inconclusive worktree check pending until the user retries', async () => {
+    const refreshProject = vi.fn()
+      .mockImplementationOnce(() => success<Project>({ ...project, worktreeStatus: 'unknown' }))
+      .mockImplementation(() => success<Project>({ ...project, worktreeStatus: 'checked' }))
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), refreshProject })
+    const user = userEvent.setup()
+    render(<App />)
+    await waitFor(() => expect(refreshProject).toHaveBeenCalledTimes(1))
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(screen.getAllByText('工作区状态待检查').length).toBeGreaterThan(0)
+    expect(screen.queryByText('当前版本已保存')).not.toBeInTheDocument()
+    expect(refreshProject).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: '刷新项目状态' }))
+    await waitFor(() => expect(refreshProject).toHaveBeenCalledTimes(2))
+    expect((await screen.findAllByText('当前版本已保存')).length).toBeGreaterThan(0)
+    expect(screen.queryByText('工作区状态待检查')).not.toBeInTheDocument()
+  })
+
+  it('keeps an explicitly checked dirty project dirty after saving a different project', async () => {
+    const otherProject: Project = { ...project, id: 'project-2', name: '第二个项目', path: 'C:/second-project', worktreeStatus: 'unknown' }
+    const api = mockApi({
+      listProjects: vi.fn(() => success<Project[]>([{ ...project, worktreeStatus: 'unknown' }, otherProject])),
+      refreshProject: vi.fn((id) => success<Project>(id === project.id ? { ...project, hasUnsavedChanges: true, worktreeStatus: 'checked' } : { ...otherProject, worktreeStatus: 'checked' }))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    expect((await screen.findAllByText('有尚未保存的修改')).length).toBeGreaterThan(0)
+    await user.click((await screen.findAllByRole('button', { name: /第二个项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: '创建保存点' }))
+    await user.click(screen.getByRole('button', { name: '保存当前版本' }))
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole('button', { name: '所有项目' }))
+    const dirtyCard = screen.getAllByRole('button', { name: /我的 AI 项目/ }).at(-1)!
+    expect(within(dirtyCard).getByText('有尚未保存的修改')).toBeInTheDocument()
+    expect(within(dirtyCard).queryByText('当前版本已保存')).not.toBeInTheDocument()
+  })
+
+  it('clears the previous project timeline and ignores a late refresh after switching projects', async () => {
+    const otherProject = { ...project, id: 'project-2', name: '第二个项目', path: 'C:/second-project' }
+    const otherCheckpoint = { ...checkpoint, id: 'checkpoint-2', projectId: otherProject.id, title: '第二个项目的保存点', taskText: '另一个项目的任务' }
+    const oldRefresh = deferred<ApiResult<Checkpoint[]>>()
+    const otherTimeline = deferred<ApiResult<Checkpoint[]>>()
+    const listCheckpoints = vi.fn()
+      .mockImplementationOnce(() => success([checkpoint]))
+      .mockImplementationOnce(() => oldRefresh.promise)
+      .mockImplementationOnce(() => otherTimeline.promise)
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project, otherProject])), refreshProject: vi.fn((id) => success(id === project.id ? project : otherProject)), listCheckpoints })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(await screen.findByRole('button', { name: /邮箱验证码登录/ })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '刷新项目状态' }))
+    await waitFor(() => expect(listCheckpoints).toHaveBeenCalledTimes(2))
+    await user.click(screen.getByRole('button', { name: /第二个项目/ }))
+    expect(screen.queryByRole('button', { name: /邮箱验证码登录/ })).not.toBeInTheDocument()
+    expect(screen.getByText('正在读取保存记录…')).toBeInTheDocument()
+    await act(async () => otherTimeline.resolve({ ok: true, data: [otherCheckpoint] }))
+    expect(await screen.findByRole('button', { name: /第二个项目的保存点/ })).toBeInTheDocument()
+    await act(async () => oldRefresh.resolve({ ok: true, data: [checkpoint] }))
+    expect(screen.getByRole('button', { name: /第二个项目的保存点/ })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /邮箱验证码登录/ })).not.toBeInTheDocument()
+  })
+
+  it('shows a retryable timeline error instead of claiming there are no checkpoints', async () => {
+    const listCheckpoints = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new Error('保存记录读取失败')))
+      .mockImplementation(() => success([checkpoint]))
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), listCheckpoints })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存记录暂时无法读取')
+    expect(screen.queryByText('时间线还很安静')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新读取' }))
+    expect(await screen.findByRole('button', { name: /邮箱验证码登录/ })).toBeInTheDocument()
+  })
+
+  it('keeps a newly opened checkpoint diff when an earlier request finishes late', async () => {
+    window.localStorage.setItem('vibegit.change-presentation', 'code')
+    const otherCheckpoint = { ...checkpoint, id: 'checkpoint-2', title: '后来的保存点', taskText: '第二轮修改' }
+    const firstDiff = deferred<ApiResult<CheckpointDiff>>()
+    const makeDiff = (patch: string): CheckpointDiff => ({ fromObjectId: 'old', toObjectId: 'new', insertions: 1, deletions: 0, files: [{ path: 'src/app.ts', kind: 'modified', patch, binary: false, insertions: 1, deletions: 0 }] })
+    window.vibegit = mockApi({
+      listProjects: vi.fn(() => success([project])), listCheckpoints: vi.fn(() => success([checkpoint, otherCheckpoint])),
+      getCheckpointDiff: vi.fn((id) => id === checkpoint.id ? firstDiff.promise : success(makeDiff('+正确的后一个保存点')))
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: /邮箱验证码登录/ }))
+    await user.keyboard('{Escape}')
+    await user.click(screen.getByRole('button', { name: /后来的保存点/ }))
+    expect(await screen.findByText('+正确的后一个保存点')).toBeInTheDocument()
+    await act(async () => firstDiff.resolve({ ok: true, data: makeDiff('+过期的前一个保存点') }))
+    expect(screen.getByText('+正确的后一个保存点')).toBeInTheDocument()
+    expect(screen.queryByText('+过期的前一个保存点')).not.toBeInTheDocument()
+  })
+
+  it('lets users inspect code directly when a feature summary is unavailable and retry a failed diff', async () => {
+    const getCheckpointDiff = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new Error('暂时无法读取差异')))
+      .mockImplementation(() => success<CheckpointDiff>({ fromObjectId: 'old', toObjectId: 'new', insertions: 0, deletions: 0, files: [] }))
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), listCheckpoints: vi.fn(() => success([checkpoint])), getCheckpointDiff })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: /邮箱验证码登录/ }))
+    expect(await screen.findByText('这次还没有功能说明')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '代码变更' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂时无法读取差异')
+    expect(screen.queryByText('这个保存点没有文件内容变化')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新读取代码变更' }))
+    expect(await screen.findByText('这个保存点没有文件内容变化')).toBeInTheDocument()
+  })
+
+  it('traps dialog focus, restores it on Escape, and prevents dismissing an in-flight save', async () => {
+    const pendingSave = deferred<ApiResult<Checkpoint>>()
+    const api = mockApi({ listProjects: vi.fn(() => success([project])), createCheckpoint: vi.fn(() => pendingSave.promise) })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    const trigger = screen.getByRole('button', { name: '创建保存点' })
+    await user.click(trigger)
+    let dialog = screen.getByRole('dialog', { name: '创建保存点' })
+    expect(within(dialog).getByRole('textbox', { name: '给这个版本一个容易记住的名字' })).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(within(dialog).getByRole('button', { name: '关闭' })).toHaveFocus()
+    await user.tab({ shift: true })
+    expect(within(dialog).getByRole('button', { name: '保存当前版本' })).toHaveFocus()
+    await user.tab()
+    expect(within(dialog).getByRole('button', { name: '关闭' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    await user.click(trigger)
+    dialog = screen.getByRole('dialog', { name: '创建保存点' })
+    await user.click(within(dialog).getByRole('button', { name: '保存当前版本' }))
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: '关闭' })).toBeDisabled()
+    await user.keyboard('{Escape}')
+    fireEvent.mouseDown(dialog.parentElement!)
+    expect(screen.getByRole('dialog', { name: '创建保存点' })).toBeInTheDocument()
+    expect(api.createCheckpoint).toHaveBeenCalledTimes(1)
+    await act(async () => pendingSave.resolve({ ok: true, data: checkpoint }))
+    expect(await screen.findByText('当前版本已安全保存')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not report a failed safety scan as safe or retry without user action', async () => {
+    const githubScan = vi.fn()
+      .mockImplementationOnce(() => Promise.reject(new Error('安全扫描失败')))
+      .mockImplementation(() => success({ scannedAt: new Date().toISOString(), scannedFiles: 1, blocked: false, risks: [] }))
+    window.vibegit = mockApi({
+      listProjects: vi.fn(() => success([{ ...project, githubRemoteUrl: 'git@github.com:test/repo.git' }])),
+      refreshProject: vi.fn(() => success({ ...project, githubRemoteUrl: 'git@github.com:test/repo.git' })),
+      githubStatus: vi.fn(() => success({ installed: true, authenticated: true, sshKeyReady: true, message: '已连接' })), githubScan
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('备份安全检查未完成')
+    expect(screen.queryByText('未发现阻止备份的风险')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '安全备份到 GitHub' })).toBeDisabled()
+    expect(githubScan).toHaveBeenCalledTimes(1)
+    await user.click(screen.getByRole('button', { name: '重新检查' }))
+    expect(await screen.findByText('未发现阻止备份的风险')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '安全备份到 GitHub' })).toBeEnabled()
+    expect(githubScan).toHaveBeenCalledTimes(2)
+  })
+
+  it('surfaces data-directory read failures without leaving a permanent loading label', async () => {
+    window.vibegit = mockApi({ getSettings: vi.fn(() => Promise.reject(new Error('无法读取记录位置'))) })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: /设置与连接/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('无法读取记录位置')
+    expect(screen.getByText('读取失败')).toBeInTheDocument()
+  })
+
+  it('supports keyboard navigation and dismissal in checkpoint action menus', async () => {
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), listCheckpoints: vi.fn(() => success([checkpoint])) })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    const trigger = await screen.findByRole('button', { name: '打开保存点操作菜单' })
+    await user.click(trigger)
+    expect(screen.getByRole('menuitem', { name: '重命名保存点' })).toHaveFocus()
+    await user.keyboard('{ArrowDown}')
+    expect(screen.getByRole('menuitem', { name: '删除保存点' })).toHaveFocus()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('reports unavailable window controls instead of silently succeeding', async () => {
+    window.vibegit = mockApi({ minimizeWindow: vi.fn(() => Promise.resolve<ApiResult<boolean>>({ ok: false, error: { code: 'BROWSER_WINDOW_CONTROL_UNAVAILABLE', message: '浏览器兼容模式不支持桌面窗口操作', retryable: false } })) })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('button', { name: '最小化窗口' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('浏览器兼容模式不支持桌面窗口操作')
   })
 
   it('provides custom frameless window controls', async () => {
@@ -291,6 +530,98 @@ describe('VibeGit UI flow', () => {
     await user.click(await screen.findByRole('button', { name: '连接 GitHub 并创建 SSH 密钥' }))
 
     await waitFor(() => expect(api.githubAuthorize).toHaveBeenCalledTimes(1))
+  })
+
+  it('keeps GitHub authorization available during a slow scan and shows only safe device instructions', async () => {
+    const pendingScan = deferred<ApiResult<SensitiveScanResult>>()
+    const pendingAuthorization = deferred<ApiResult<GitHubOnboardingResult>>()
+    const api = mockApi({
+      listProjects: vi.fn(() => success([project])),
+      githubStatus: vi.fn(() => success({ installed: true, authenticated: false, sshKeyReady: false, message: '尚未登录' })),
+      githubScan: vi.fn(() => pendingScan.promise),
+      githubAuthorize: vi.fn(() => pendingAuthorization.promise),
+      githubAuthorizationStatus: vi.fn(() => success<GitHubAuthorizationState>({ phase: 'authorizing', message: 'RAW_OUTPUT_DO_NOT_RENDER', userCode: 'ABCD-1234', verificationUri: 'https://untrusted.example/device' }))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    const connect = await screen.findByRole('button', { name: '连接 GitHub 并创建 SSH 密钥' })
+    expect(connect).toBeEnabled()
+    expect(screen.getByText('正在扫描项目文件，连接 GitHub 无需等待扫描完成…')).toBeInTheDocument()
+    expect(screen.queryByText('未发现阻止备份的风险')).not.toBeInTheDocument()
+    await user.click(connect)
+    expect(await screen.findByText('ABCD-1234')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '打开 GitHub 授权页面' })).toHaveAttribute('href', 'https://github.com/login/device')
+    expect(screen.queryByText('RAW_OUTPUT_DO_NOT_RENDER')).not.toBeInTheDocument()
+    await user.click(connect)
+    await user.keyboard('{Escape}')
+    expect(api.githubAuthorize).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog', { name: 'GitHub 私有备份' })).toBeInTheDocument()
+    await act(async () => pendingAuthorization.resolve({ ok: true, data: { username: 'test-user', sshKeyCreated: true, message: 'GitHub 已连接' } }))
+    await waitFor(() => expect(screen.queryByText('ABCD-1234')).not.toBeInTheDocument())
+    expect(api.githubScan).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps a repair action for an already prepared SSH connection', async () => {
+    window.vibegit = mockApi({
+      listProjects: vi.fn(() => success([project])),
+      githubStatus: vi.fn(() => success({ installed: true, authenticated: true, sshKeyReady: true, username: 'test-user', message: '已准备好' }))
+    })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    await user.click(await screen.findByRole('button', { name: '检查并修复 GitHub 连接' }))
+    await waitFor(() => expect(window.vibegit.githubAuthorize).toHaveBeenCalledTimes(1))
+  })
+
+  it('does not misreport or repeat a successful upload when refreshing the local list fails', async () => {
+    const connectedProject: Project = { ...project, githubRemoteUrl: 'git@github.com:test/repo.git', githubSyncStatus: 'pending' }
+    const pendingPush = deferred<ApiResult<GitHubSyncResult>>()
+    const listProjects = vi.fn()
+      .mockImplementationOnce(() => success([connectedProject]))
+      .mockImplementation(() => Promise.reject(new Error('本地列表读取失败')))
+    const api = mockApi({
+      listProjects,
+      refreshProject: vi.fn(() => success(connectedProject)),
+      githubStatus: vi.fn(() => success({ installed: true, authenticated: true, sshKeyReady: true, message: '已连接' })),
+      githubPush: vi.fn(() => pendingPush.promise)
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    const push = await screen.findByRole('button', { name: '安全备份到 GitHub' })
+    await waitFor(() => expect(push).toBeEnabled())
+    await user.click(push)
+    await user.click(push)
+    await user.keyboard('{Escape}')
+    expect(api.githubPush).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog', { name: 'GitHub 私有备份' })).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).getAllByRole('button', { name: '关闭' }).every((button) => button.hasAttribute('disabled'))).toBe(true)
+    await act(async () => pendingPush.resolve({ ok: true, data: { remoteUrl: connectedProject.githubRemoteUrl!, checkpointId: checkpoint.id, syncedAt: new Date().toISOString(), branch: 'vibegit-backup' } }))
+    expect(await screen.findByText(/但本地列表暂未刷新；操作已完成，无需重复提交/)).toBeInTheDocument()
+    expect(screen.getByText('本次备份已完成，已同步到 GitHub。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '本次备份已完成' })).toBeDisabled()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.githubPush).toHaveBeenCalledTimes(1)
+    expect(api.githubScan).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a failed backup separately from pending or successful synchronization', async () => {
+    const failedProject: Project = { ...project, githubRemoteUrl: 'git@github.com:test/repo.git', githubSyncStatus: 'failed' }
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([failedProject])), refreshProject: vi.fn(() => success(failedProject)) })
+    const user = userEvent.setup()
+    render(<App />)
+    expect(await screen.findByText('上次 GitHub 备份失败')).toBeInTheDocument()
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    expect(screen.getByText('上次备份失败')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'GitHub 备份' }))
+    expect(within(screen.getByRole('dialog')).getByText('上次备份失败')).toBeInTheDocument()
+    expect(within(screen.getByRole('dialog')).queryByText('等待同步')).not.toBeInTheDocument()
   })
 
   it('opens a real checkpoint diff and completes the confirmed restore/undo flow', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "vibegit",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A local, reversible project safety net for AI-assisted coding.",
   "main": "out/main/index.js",
   "private": true,
@@ -51,7 +51,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icon.ico",
@@ -88,11 +90,11 @@
     "lucide-react": "1.24.0",
     "react": "19.2.7",
     "react-dom": "19.2.7",
-    "tsx": "4.23.0",
     "tsup": "8.5.1",
+    "tsx": "4.23.0",
     "typescript": "6.0.3",
     "typescript-eslint": "8.63.0",
     "vite": "7.3.6",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }

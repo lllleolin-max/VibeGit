@@ -31,6 +31,7 @@ export interface Project {
   isGitRepository: boolean
   protectionEnabled: boolean
   hasUnsavedChanges: boolean
+  worktreeStatus?: 'unknown' | 'checked'
   untrackedFiles: number
   lastAgent?: AgentType
   lastCheckpointAt?: string
@@ -224,6 +225,13 @@ export interface GitHubOnboardingResult {
   message: string
 }
 
+export interface GitHubAuthorizationState {
+  phase: 'idle' | 'authorizing' | 'provisioning' | 'complete' | 'failed'
+  message: string
+  verificationUri?: string
+  userCode?: string
+}
+
 export interface GitHubSyncResult {
   remoteUrl: string
   checkpointId: string
@@ -344,16 +352,16 @@ export class VibeGitError extends Error {
   }
 }
 
-const SECRET_ASSIGNMENT = /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|_?auth[_-]?token|client[_-]?secret|secret|password|authorization)\s*[:=]\s*)[^\s,;]+/gi
-const BEARER_TOKEN = /(bearer\s+)[a-z0-9._~+/-]{8,}/gi
-const KNOWN_ACCESS_TOKEN = /\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{20,}|(?:sk|rk)-(?:live|test|proj)-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})\b/g
-const PRIVATE_KEY_BLOCK = /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/g
+const SECRET_ASSIGNMENT = /((?:api[_-]?key|access[_-]?token|refresh[_-]?token|_?auth[_-]?token|client[_-]?secret|secret|password|authorization)["']?\s*[:=]\s*)(?:"(?:\\.|[^"\\])*(?:"|$)|'(?:\\.|[^'\\])*(?:'|$)|[^\s,;]+)/gi
+const BEARER_TOKEN = /((?:bearer|basic)\s+)[a-z0-9._~+/=-]{8,}/gi
+const KNOWN_ACCESS_TOKEN = /\b(?:(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}|npm_[A-Za-z0-9]{20,}|(?:sk|rk)-(?:live|test|proj)-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16})\b/g
+const PRIVATE_KEY_BLOCK = /-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?(?:-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----|$)/g
 
 export function redactSecrets(value: string): string {
   return value
     .replace(PRIVATE_KEY_BLOCK, '[REDACTED PRIVATE KEY]')
-    .replace(SECRET_ASSIGNMENT, '$1[REDACTED]')
     .replace(BEARER_TOKEN, '$1[REDACTED]')
+    .replace(SECRET_ASSIGNMENT, '$1[REDACTED]')
     .replace(KNOWN_ACCESS_TOKEN, '[REDACTED]')
 }
 
@@ -409,6 +417,7 @@ export const IPC_CHANNELS = {
   retrieveShelf: 'shelves:retrieve',
   githubStatus: 'github:status',
   githubAuthorize: 'github:authorize',
+  githubAuthorizationStatus: 'github:authorization-status',
   githubScan: 'github:scan',
   githubCreatePrivate: 'github:create-private',
   githubConnect: 'github:connect',
@@ -462,6 +471,7 @@ export interface VibeGitApi {
   retrieveShelf(shelfId: string): Promise<ApiResult<ShelvedChange>>
   githubStatus(): Promise<ApiResult<GitHubCliStatus>>
   githubAuthorize(): Promise<ApiResult<GitHubOnboardingResult>>
+  githubAuthorizationStatus(): Promise<ApiResult<GitHubAuthorizationState>>
   githubScan(projectId: string): Promise<ApiResult<SensitiveScanResult>>
   githubCreatePrivate(input: CreatePrivateRepositoryInput): Promise<ApiResult<Project>>
   githubConnect(input: ConnectRemoteInput): Promise<ApiResult<Project>>

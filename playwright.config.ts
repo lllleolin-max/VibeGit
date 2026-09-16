@@ -2,6 +2,7 @@ import { defineConfig } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/desktop',
+  outputDir: './test-results/desktop-traces',
   timeout: 120_000,
   expect: { timeout: 15_000 },
   workers: 1,
@@ -9,4 +10,3 @@ export default defineConfig({
   reporter: [['list']],
   use: { trace: 'retain-on-failure' }
 })
-

@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, delimiter, join, resolve } from 'node:path'
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { basename, delimiter, dirname, join, resolve } from 'node:path'
+import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
 import type {
   AddProjectInput,
   AgentConnectionStatus,
@@ -15,6 +15,7 @@ import type {
   ConnectRemoteInput,
   CreateCheckpointInput,
   CreatePrivateRepositoryInput,
+  GitHubAuthorizationState,
   GitHubCliStatus,
   GitHubOnboardingResult,
   GitHubSyncResult,
@@ -127,8 +128,42 @@ function samePath(left: string, right: string): boolean {
     : normalizedLeft === normalizedRight
 }
 
+function preferencesPaths(): string[] {
+  const appData = process.platform === 'win32'
+    ? process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming')
+    : process.platform === 'darwin'
+      ? join(homedir(), 'Library', 'Application Support')
+      : process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config')
+  const names = process.platform === 'linux' ? ['vibegit', 'VibeGit'] : ['VibeGit', 'vibegit']
+  return names.map((name) => resolve(appData, name, 'vibegit-preferences.json'))
+}
+
+export async function saveDataDirectoryPreference(directory: string): Promise<void> {
+  const path = preferencesPaths()[0]!
+  await mkdir(dirname(path), { recursive: true })
+  const temporaryPath = `${path}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporaryPath, JSON.stringify({ dataDirectory: resolve(directory) }, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    // CLI hooks can start at any moment; they must see the complete old or new
+    // preference, never a partially written file and an unrelated default DB.
+    await rename(temporaryPath, path)
+  } finally {
+    await unlink(temporaryPath).catch(() => undefined)
+  }
+}
+
 export function defaultDataDirectory(): string {
   if (process.env.VIBEGIT_DATA_DIR) return resolve(process.env.VIBEGIT_DATA_DIR)
+  // Share the desktop setting with the CLI. Both directory spellings were used
+  // by Electron's package/product name; keep existing preferences readable.
+  for (const path of preferencesPaths()) {
+    try {
+      const value = JSON.parse(readFileSync(path, 'utf8')) as { dataDirectory?: unknown } | null
+      if (typeof value?.dataDirectory === 'string' && value.dataDirectory.trim()) {
+        return resolve(dirname(path), value.dataDirectory)
+      }
+    } catch { /* Missing or invalid preferences retain the platform default. */ }
+  }
   if (process.platform === 'win32' && process.env.APPDATA) return resolve(process.env.APPDATA, 'VibeGit')
   if (process.platform === 'darwin') return resolve(homedir(), 'Library', 'Application Support', 'VibeGit')
   return resolve(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), 'vibegit')
@@ -346,6 +381,7 @@ export class VibeGitService {
       isGitRepository,
       protectionEnabled: false,
       hasUnsavedChanges: isGitRepository ? (await this.git.getStatus(projectPath)).hasChanges : true,
+      worktreeStatus: 'checked',
       untrackedFiles: isGitRepository ? (await this.git.getStatus(projectPath)).untracked.length : 0,
       githubSyncStatus: 'not_configured'
     }
@@ -390,21 +426,25 @@ export class VibeGitService {
   }
 
   async listProjects(): Promise<Project[]> {
-    const projects = this.database.listProjects()
-    const refreshed: Project[] = []
-    for (const project of projects) {
-      try { refreshed.push(await this.refreshProject(project.id)) }
-      catch { refreshed.push(project) }
-    }
-    return refreshed
+    // Opening the project list must not scan or hash every working tree. Callers
+    // explicitly refresh the project they are inspecting. The registry does not
+    // persist working-tree status, so its default false must not imply "saved".
+    return this.database.listProjects().map((project) => ({ ...project, worktreeStatus: 'unknown' }))
   }
 
   async refreshProject(projectId: string): Promise<Project> {
     const project = this.requireProject(projectId)
     const isGitRepository = await this.git.isRepository(project.path)
     if (!isGitRepository) {
-      const updated = { ...project, isGitRepository: false, protectionEnabled: false, hasUnsavedChanges: true, untrackedFiles: 0 }
-      this.database.upsertProject(updated)
+      // The project may have been removed or its remote updated while Git ran.
+      const updated = this.database.transaction(() => {
+        const current = this.database.getProject(projectId)
+        if (!current) return undefined
+        const result: Project = { ...current, isGitRepository: false, protectionEnabled: false, hasUnsavedChanges: true, untrackedFiles: 0, worktreeStatus: 'checked' }
+        this.database.upsertProject(result)
+        return result
+      })
+      if (!updated) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
       return updated
     }
     if (project.protectionEnabled) await ensureProjectProtectionMarker(this.git, project.path)
@@ -416,25 +456,38 @@ export class VibeGitService {
     const latest = this.database.getLatestCheckpoint(projectId)
     const active = this.database.getActiveCheckpoint(projectId) ?? latest
     const activeTree = active ? await this.git.getCommitTree(project.path, active.gitObjectId) : undefined
-    const validatedRemoteUrl = project.githubRemoteUrl && remoteUrl === project.githubRemoteUrl
-      ? remoteUrl
-      : undefined
-    const updated: Project = {
-      ...project,
-      isGitRepository: true,
-      protectionEnabled: project.protectionEnabled && Boolean(latest),
-      hasUnsavedChanges: activeTree ? capture.treeObjectId !== activeTree : status.hasChanges,
-      untrackedFiles: status.untracked.length,
-      lastActivityAt: latest?.createdAt ?? project.lastActivityAt,
-      ...(latest ? { lastCheckpointAt: latest.createdAt, lastAgent: latest.agent } : {}),
-      githubSyncStatus: validatedRemoteUrl ? project.githubSyncStatus : 'not_configured',
-      ...(validatedRemoteUrl ? { githubRemoteUrl: validatedRemoteUrl } : {})
-    }
-    if (!validatedRemoteUrl) {
-      delete updated.githubRemoteUrl
-      delete updated.lastSyncedAt
-    }
-    this.database.upsertProject(updated)
+    // A background check can overlap a successful connection, push, or project
+    // removal. Read current metadata only after all I/O and keep the following
+    // synchronous write together; never reinsert a project from a stale snapshot.
+    const updated = this.database.transaction(() => {
+      const current = this.database.getProject(projectId)
+      if (!current) return undefined
+      const currentLatest = this.database.getLatestCheckpoint(projectId)
+      const currentActive = this.database.getActiveCheckpoint(projectId) ?? currentLatest
+      const remoteChangedDuringCheck = current.githubRemoteUrl !== project.githubRemoteUrl
+      const validatedRemoteUrl = remoteChangedDuringCheck
+        ? current.githubRemoteUrl
+        : current.githubRemoteUrl && remoteUrl === current.githubRemoteUrl ? remoteUrl : undefined
+      const result: Project = {
+        ...current,
+        isGitRepository: true,
+        protectionEnabled: current.protectionEnabled && Boolean(currentLatest),
+        hasUnsavedChanges: activeTree ? capture.treeObjectId !== activeTree : status.hasChanges,
+        worktreeStatus: currentActive?.id === active?.id ? 'checked' : 'unknown',
+        untrackedFiles: status.untracked.length,
+        lastActivityAt: currentLatest?.createdAt ?? current.lastActivityAt,
+        ...(currentLatest ? { lastCheckpointAt: currentLatest.createdAt, lastAgent: currentLatest.agent } : {}),
+        githubSyncStatus: validatedRemoteUrl ? current.githubSyncStatus : 'not_configured',
+        ...(validatedRemoteUrl ? { githubRemoteUrl: validatedRemoteUrl } : {})
+      }
+      if (!validatedRemoteUrl) {
+        delete result.githubRemoteUrl
+        delete result.lastSyncedAt
+      }
+      this.database.upsertProject(result)
+      return result
+    })
+    if (!updated) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
     return updated
   }
 
@@ -542,6 +595,10 @@ export class VibeGitService {
     return await this.github.authorizeAndProvisionSshKey(this.settings.dataDirectory)
   }
 
+  githubAuthorizationStatus(): GitHubAuthorizationState {
+    return this.github.githubAuthorizationStatus()
+  }
+
   async scanSensitiveFiles(projectId: string): Promise<SensitiveScanResult> {
     return await this.github.scan(projectId)
   }
@@ -552,12 +609,12 @@ export class VibeGitService {
 
   async createPrivateRepository(input: CreatePrivateRepositoryInput): Promise<Project> {
     await this.github.createPrivateRepository(input.projectId, input.name, input.owner)
-    return await this.refreshProject(input.projectId)
+    return { ...this.requireProject(input.projectId), worktreeStatus: 'unknown' }
   }
 
   async connectRemote(input: ConnectRemoteInput): Promise<Project> {
     await this.github.connect(input.projectId, input.remoteUrl)
-    return await this.refreshProject(input.projectId)
+    return { ...this.requireProject(input.projectId), worktreeStatus: 'unknown' }
   }
 
   async pushToGitHub(projectId: string): Promise<GitHubSyncResult> {

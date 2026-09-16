@@ -4,6 +4,11 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { VibeGitService } from '@vibegit/core'
 
+// Reuse the same acceptance flows for source builds and packaged release checks.
+const launchOptions = process.env.VIBEGIT_DESKTOP_EXECUTABLE
+  ? { executablePath: process.env.VIBEGIT_DESKTOP_EXECUTABLE }
+  : {}
+
 test('built desktop app completes save → diff → restore → undo without a white screen', async () => {
   const root = await mkdtemp(join(tmpdir(), 'vibegit-desktop-e2e-'))
   const projectPath = join(root, '桌面 验收项目')
@@ -21,10 +26,12 @@ test('built desktop app completes save → diff → restore → undo without a w
   const consoleErrors: string[] = []
   try {
     app = await electron.launch({
-      args: ['.'],
+      ...launchOptions,
+      args: ['.', `--user-data-dir=${join(root, 'electron-profile')}`],
       cwd: resolve('.'),
       env: { ...process.env, VIBEGIT_DATA_DIR: dataDirectory }
     })
+    expect(await app.evaluate(({ app }) => app.getPath('userData'))).toBe(join(root, 'electron-profile'))
     page = await app.firstWindow()
     page.on('pageerror', (error) => pageErrors.push(error.message))
     page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
@@ -45,7 +52,7 @@ test('built desktop app completes save → diff → restore → undo without a w
 
     await writeFile(join(projectPath, 'app.txt'), 'version two\nnew feature\n', 'utf8')
     await page.getByRole('button', { name: '刷新项目状态' }).click()
-    await expect(page.getByText('有新的修改')).toBeVisible()
+    await expect(page.getByRole('main').getByText('有尚未保存的修改', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: '创建保存点' }).click()
     await page.getByLabel('给这个版本一个容易记住的名字').fill('桌面 E2E 功能版本')
     await page.getByRole('button', { name: '保存当前版本' }).click()
@@ -83,7 +90,8 @@ test('built desktop app ignores an injected renderer URL and shows the local fir
   let app: ElectronApplication | undefined
   try {
     app = await electron.launch({
-      args: ['.'],
+      ...launchOptions,
+      args: ['.', `--user-data-dir=${join(root, 'electron-profile')}`],
       cwd: resolve('.'),
       env: {
         ...process.env,
@@ -92,6 +100,7 @@ test('built desktop app ignores an injected renderer URL and shows the local fir
         VIBEGIT_DATA_DIR: join(root, 'app-data')
       }
     })
+    expect(await app.evaluate(({ app }) => app.getPath('userData'))).toBe(join(root, 'electron-profile'))
     const page = await app.firstWindow()
     await page.waitForFunction(() => document.documentElement.dataset.vibegitReady === 'true')
     await expect(page.getByRole('heading', { name: '先选择一个正在用 AI 开发的文件夹' })).toBeVisible()
@@ -106,7 +115,7 @@ test('built desktop app ignores an injected renderer URL and shows the local fir
     await page.getByRole('button', { name: /选择项目文件夹/ }).click()
     await expect(page.getByRole('heading', { name: '从界面添加的项目' })).toBeVisible()
     await expect(page.getByText('为这个项目开启版本保护')).toBeVisible()
-    await page.getByRole('button', { name: '开启版本保护' }).click()
+    await page.getByRole('button', { name: '开启版本保护', exact: true }).click()
     await expect(page.getByText('初始化项目')).toBeVisible()
     await expect(access(join(projectPath, '.git'))).resolves.toBeUndefined()
     await page.screenshot({ path: resolve('test-results', 'vibegit-first-use-protected.png'), fullPage: true })

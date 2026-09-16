@@ -1,4 +1,4 @@
-import { mkdir, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VibeGitService } from '@vibegit/core'
@@ -13,6 +13,64 @@ function normalizedLines(value: string): string {
 describe('checkpoint and safe restore', () => {
   let sandbox: TestSandbox | undefined
   afterEach(async () => { if (sandbox) await cleanupSandbox(sandbox); sandbox = undefined })
+
+  it('previews removal of the current tracked path when restoring a renamed file', async () => {
+    sandbox = await createSandbox('rename impact preview')
+    await writeProjectFile(sandbox, 'before.txt', 'same file content\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    const initial = (await sandbox.service.initializeProtection(project.id)).checkpoint
+    await rename(join(sandbox.projectPath, 'before.txt'), join(sandbox.projectPath, 'after.txt'))
+    await sandbox.service.git.runner.run(sandbox.projectPath, ['add', '-A'])
+
+    const preview = await sandbox.service.prepareRestore(project.id, initial.id)
+    expect(preview.files).toContainEqual(expect.objectContaining({ path: 'after.txt', action: 'remove' }))
+    expect(preview.files).toContainEqual(expect.objectContaining({ path: 'before.txt', action: 'add' }))
+    expect(preview.removeCount).toBe(1)
+    await sandbox.service.executeRestore(preview.token)
+    await expect(readFile(join(sandbox.projectPath, 'after.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(normalizedLines(await readFile(join(sandbox.projectPath, 'before.txt'), 'utf8'))).toBe('same file content\n')
+  })
+
+  it('keeps the restored base directory when shelving a file that replaced it', async () => {
+    sandbox = await createSandbox('shelf directory replacement')
+    await writeProjectFile(sandbox, 'config/base.txt', 'stable directory\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    await sandbox.service.initializeProtection(project.id)
+    await rm(join(sandbox.projectPath, 'config'), { recursive: true })
+    await writeProjectFile(sandbox, 'config', 'unfinished file\n')
+
+    const shelf = await sandbox.service.createShelf(project.id, 'replace directory')
+    expect(normalizedLines(await readFile(join(sandbox.projectPath, 'config/base.txt'), 'utf8'))).toBe('stable directory\n')
+    await sandbox.service.retrieveShelf(shelf.id)
+    expect(normalizedLines(await readFile(join(sandbox.projectPath, 'config'), 'utf8'))).toBe('unfinished file\n')
+  })
+
+  it.each(['missing', 'corrupted'])('checks %s ignored recovery content before undo changes any current files', async (condition) => {
+    sandbox = await createSandbox('undo corrupt recovery preflight')
+    await writeProjectFile(sandbox, '.gitignore', '\n')
+    await writeProjectFile(sandbox, 'secret.env', 'target placeholder\n')
+    await writeProjectFile(sandbox, 'app.txt', 'target version\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    const initial = (await sandbox.service.initializeProtection(project.id)).checkpoint
+    await writeProjectFile(sandbox, '.gitignore', 'secret.env\n')
+    await writeProjectFile(sandbox, 'secret.env', 'original ignored value\n')
+    await writeProjectFile(sandbox, 'app.txt', 'before restore\n')
+    const preview = await sandbox.service.prepareRestore(project.id, initial.id)
+    const restored = await sandbox.service.executeRestore(preview.token)
+    const recoveryFile = join(restored.recoveryDirectory!, 'files', 'secret.env')
+    if (condition === 'missing') await rm(recoveryFile)
+    else await writeFile(recoveryFile, 'damaged recovery content\n')
+    await writeProjectFile(sandbox, 'app.txt', 'edits after restore\n')
+
+    await expect(sandbox.service.undoRestore(restored.id)).rejects.toMatchObject({
+      code: condition === 'missing' ? 'RECOVERY_ENTRY_MISSING' : 'RECOVERY_ENTRY_CORRUPTED'
+    })
+    expect(await readFile(join(sandbox.projectPath, 'app.txt'), 'utf8')).toBe('edits after restore\n')
+    expect(sandbox.service.database.getRestore(restored.id)?.status).toBe('completed')
+    await writeFile(recoveryFile, 'original ignored value\n')
+    await expect(sandbox.service.undoRestore(restored.id)).resolves.toMatchObject({ status: 'undone' })
+    expect(await readFile(join(sandbox.projectPath, 'secret.env'), 'utf8')).toBe('original ignored value\n')
+  })
 
   it('creates a readable initial checkpoint for an empty unborn repository', async () => {
     sandbox = await createSandbox('empty project')

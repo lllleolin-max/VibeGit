@@ -15,12 +15,18 @@
 
 ## Agent 与 IPC
 
+- 桌面和 CLI/Hook 共用本地记录目录偏好，保留显式 `VIBEGIT_DATA_DIR` 优先级；偏好使用同目录原子替换，不迁移或删除旧记录。
+- Agent 功能摘要入盘及读取均验证和脱敏；仅在事件持久化成功后消费，失败可重试。脱敏覆盖引用凭据、认证头和不完整私钥块。
+
 - Hook 只处理已登记并已开启保护的项目；子目录 `cwd` 会归属到最深的已登记项目根。
 - Agent 事件按 `(project, agent, session)` 关联 task-start；source event ID 幂等去重，任务文本先脱敏后保存。
 - Hook 对未登记、未开启保护或已消失的工作目录安全跳过并输出 `{}`，不阻塞 Agent；手工 `event` 命令仍返回严格错误。
 - Renderer 无 Node/文件系统权限。preload 仅公开类型化 API，Main 仅接受主窗口主 frame 的精确本地 URL。
 
 ## GitHub 私有备份
+
+- `.gitignore` 自动更新拒绝符号链接、硬链接和非普通文件；读取与追加使用同一已验证句柄。
+- 专用 SSH 命令使用 shell 字面参数引用；gh/SSH 标准输出与错误输出合计限制为 4 MiB。
 
 - `gh` 调用固定 `GH_HOST=github.com`，状态和用户 API 明确指定 `github.com`；不信任环境中的 Enterprise host 重定向。
 - 创建仓库始终传 `--private`，创建/连接/每次 push 前都验证 Private 可见性。

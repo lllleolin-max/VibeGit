@@ -1,9 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { defaultDataDirectory, VibeGitService } from '@vibegit/core'
+import { defaultDataDirectory, saveDataDirectoryPreference, VibeGitService } from '@vibegit/core'
 import {
   fail,
   IPC_CHANNELS,
@@ -19,28 +19,6 @@ import {
 let service: VibeGitService | undefined
 let mainWindow: BrowserWindow | undefined
 let diagnosticsPath = ''
-
-interface DesktopPreferences {
-  dataDirectory?: string
-}
-
-function preferencesPath(): string {
-  return join(app.getPath('userData'), 'vibegit-preferences.json')
-}
-
-async function readPreferences(): Promise<DesktopPreferences> {
-  try {
-    const value = JSON.parse(await readFile(preferencesPath(), 'utf8')) as Record<string, unknown>
-    return typeof value.dataDirectory === 'string' && value.dataDirectory.trim() ? { dataDirectory: resolve(value.dataDirectory) } : {}
-  } catch {
-    return {}
-  }
-}
-
-async function savePreferences(preferences: DesktopPreferences): Promise<void> {
-  await mkdir(app.getPath('userData'), { recursive: true })
-  await writeFile(preferencesPath(), JSON.stringify(preferences, null, 2), 'utf8')
-}
 
 async function runHidden(executable: string, args: string[]): Promise<{ code: number; output: string }> {
   return await new Promise((resolveResult, reject) => {
@@ -221,6 +199,7 @@ function registerIpc(): void {
   registerHandler(IPC_CHANNELS.retrieveShelf, (shelfId: string) => requiredService().retrieveShelf(requireString(shelfId, 'shelfId', 100)))
   registerHandler(IPC_CHANNELS.githubStatus, () => requiredService().githubStatus())
   registerHandler(IPC_CHANNELS.githubAuthorize, () => requiredService().authorizeGitHub())
+  registerHandler(IPC_CHANNELS.githubAuthorizationStatus, () => requiredService().githubAuthorizationStatus())
   registerHandler(IPC_CHANNELS.githubScan, (projectId: string) => requiredService().scanSensitiveFiles(requireString(projectId, 'projectId', 100)))
   registerHandler(IPC_CHANNELS.githubCreatePrivate, (input: CreatePrivateRepositoryInput) => {
     const record = requireRecord(input, 'input')
@@ -274,7 +253,7 @@ function registerIpc(): void {
   registerHandler(IPC_CHANNELS.setDataDirectory, async (path: string) => {
     const dataDirectory = resolve(requireString(path, 'path', 10_000))
     await mkdir(dataDirectory, { recursive: true })
-    await savePreferences({ dataDirectory })
+    await saveDataDirectoryPreference(dataDirectory)
     return { dataDirectory, restartRequired: dataDirectory !== requiredService().settings.dataDirectory }
   })
   registerHandler(IPC_CHANNELS.checkEnvironment, async () => {
@@ -320,7 +299,12 @@ async function createWindow(): Promise<void> {
     }
   })
   mainWindow.once('ready-to-show', () => mainWindow?.show())
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url === 'https://github.com/login/device') {
+      void shell.openExternal(url).catch(() => diagnostic('github-authorization-page-open-failed'))
+    }
+    return { action: 'deny' }
+  })
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (!allowedRendererUrl(url)) event.preventDefault()
   })
@@ -348,8 +332,7 @@ if (!ownsSingleInstanceLock) {
 
   app.whenReady().then(async () => {
     app.setAppUserModelId('com.vibegit.desktop')
-    const preferences = await readPreferences()
-    const dataDirectory = process.env.VIBEGIT_DATA_DIR || preferences.dataDirectory || defaultDataDirectory()
+    const dataDirectory = defaultDataDirectory()
     await mkdir(join(dataDirectory, 'logs'), { recursive: true })
     diagnosticsPath = join(dataDirectory, 'logs', 'diagnostics.jsonl')
     service = new VibeGitService({ dataDirectory })

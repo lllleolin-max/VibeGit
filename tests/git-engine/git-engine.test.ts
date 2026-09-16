@@ -1,4 +1,9 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import childProcess from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { syncBuiltinESMExports } from 'node:module'
+import { PassThrough } from 'node:stream'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -6,6 +11,102 @@ import { GitCommandRunner, GitEngine } from '@vibegit/git-engine'
 import { VibeGitError } from '@vibegit/shared'
 
 describe('GitEngine', () => {
+  it.skipIf(process.platform !== 'win32').each(['timeout', 'output limit'] as const)('stops Windows descendants holding Git pipes after %s', async (reason) => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-process-tree-'))
+    const pidPath = join(root, 'descendant.pid')
+    const scriptPath = join(root, 'git-wrapper.cjs')
+    const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore', windowsHide: true })
+    let descendantPid: number | undefined
+    try {
+      await writeFile(scriptPath, [
+        "const { spawn } = require('node:child_process');",
+        "const { writeFileSync } = require('node:fs');",
+        "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 1, 2], windowsHide: true });",
+        `writeFileSync(${JSON.stringify(pidPath)}, String(child.pid));`,
+        reason === 'output limit' ? "setTimeout(() => process.stdout.write('x'.repeat(8192)), 300);" : '',
+        'setInterval(() => {}, 1000);'
+      ].join('\n'))
+      const runner = new GitCommandRunner({ executable: process.execPath, timeoutMs: reason === 'timeout' ? 1500 : 10_000 })
+      const startedAt = Date.now()
+      await expect(runner.run(root, [scriptPath], { maxOutputBytes: 1024 })).rejects.toMatchObject({
+        code: reason === 'timeout' ? 'GIT_COMMAND_TIMEOUT' : 'GIT_OUTPUT_TOO_LARGE'
+      })
+      expect(Date.now() - startedAt).toBeLessThan(8000)
+      descendantPid = Number(await readFile(pidPath, 'utf8'))
+      expect(() => process.kill(descendantPid!, 0)).toThrow()
+      expect(() => process.kill(unrelated.pid!, 0)).not.toThrow()
+    } finally {
+      unrelated.kill()
+      descendantPid ??= Number(await readFile(pidPath, 'utf8').catch(() => '0'))
+      if (descendantPid) {
+        try { process.kill(descendantPid) } catch { /* Already terminated by the runner. */ }
+      }
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    }
+  }, 12_000)
+
+  it.each(['running', 'exited'] as const)('bounds cleanup when a %s child never closes without killing a reused PID', async (state) => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-failed-cleanup-'))
+    const child = Object.assign(new EventEmitter(), {
+      pid: 987654,
+      exitCode: state === 'exited' ? 0 : null,
+      signalCode: null,
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => false),
+      unref: vi.fn()
+    })
+    const spawnMock = vi.spyOn(childProcess, 'spawn').mockImplementation(() => child as unknown as childProcess.ChildProcess)
+    syncBuiltinESMExports()
+    try {
+      // Model an OS cleanup failure without leaving a real orphan on the host.
+      const runner = new GitCommandRunner({ timeoutMs: 25 })
+      const startedAt = Date.now()
+      await expect(runner.run(root, ['status'])).rejects.toMatchObject({
+        code: 'GIT_COMMAND_TIMEOUT',
+        message: expect.stringContaining('无法确认子进程已全部退出')
+      })
+      expect(Date.now() - startedAt).toBeLessThan(8000)
+      expect(child.stdout.destroyed).toBe(true)
+      expect(child.stderr.destroyed).toBe(true)
+      if (state === 'exited') {
+        expect(spawnMock).toHaveBeenCalledTimes(1)
+        expect(child.kill).not.toHaveBeenCalled()
+      }
+    } finally {
+      spawnMock.mockRestore()
+      syncBuiltinESMExports()
+      await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+    }
+  }, 12_000)
+
+  it('limits file diffs to literal paths and preserves rename patches', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-diff-paths-'))
+    const git = new GitEngine()
+    try {
+      await git.initialize(root)
+      await writeFile(join(root, '[id].txt'), 'route before\n')
+      await writeFile(join(root, 'i.txt'), 'unrelated before\n')
+      await writeFile(join(root, 'old.txt'), 'rename this content\n')
+      const before = await git.captureWorktreeTree(root)
+      await writeFile(join(root, '[id].txt'), 'route after\n')
+      await writeFile(join(root, 'i.txt'), 'unrelated after\n')
+      await rename(join(root, 'old.txt'), join(root, 'new.txt'))
+      const after = await git.captureWorktreeTree(root)
+      const diff = await git.getDiff(root, before.treeObjectId, after.treeObjectId)
+      const route = diff.files.find((file) => file.path === '[id].txt')
+      expect(route?.patch).toContain('+route after')
+      expect(route?.patch).not.toContain('unrelated')
+      const renamed = diff.files.find((file) => file.path === 'new.txt')
+      expect(renamed).toMatchObject({ kind: 'renamed', previousPath: 'old.txt' })
+      expect(renamed?.patch).toContain('rename from old.txt')
+      expect(renamed?.patch).not.toContain('new file mode')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it('initializes an empty directory and captures non-ignored Unicode files', async () => {
     const root = await mkdtemp(join(tmpdir(), 'vibegit-git-'))
     const project = join(root, '含 空格 项目')

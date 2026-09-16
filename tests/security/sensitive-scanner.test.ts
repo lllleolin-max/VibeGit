@@ -1,4 +1,5 @@
-import { access, readFile } from 'node:fs/promises'
+import { access, link, readFile, symlink, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { TestSandbox } from '../helpers'
 import { cleanupSandbox, createSandbox, writeProjectFile } from '../helpers'
@@ -116,5 +117,49 @@ describe('Sensitive file protection', () => {
     expect(scan.risks).toContainEqual(expect.objectContaining({ path: 'config.txt', kind: 'access_token' }))
     expect(scan.risks).toContainEqual(expect.objectContaining({ path: '.npmrc', kind: 'credentials' }))
     expect(scan.risks).toContainEqual(expect.objectContaining({ path: '.npmrc', kind: 'access_token' }))
+  })
+
+  it('blocks quoted JSON credentials, fine-grained GitHub tokens, and encrypted private keys', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'config.json', JSON.stringify({ api_key: fakeSecret(), access_token: fakeSecret() }))
+    await writeProjectFile(sandbox, 'notes.txt', `${['github', 'pat', ''].join('_')}${fakeSecret()}\n`)
+    await writeProjectFile(sandbox, 'identity.txt', '-----BEGIN ENCRYPTED PRIVATE KEY-----\nexample\n-----END ENCRYPTED PRIVATE KEY-----\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+
+    const scan = await sandbox.service.scanSensitiveFiles(project.id)
+    expect(scan.risks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'config.json', kind: 'api_key' }),
+      expect.objectContaining({ path: 'config.json', kind: 'access_token' }),
+      expect.objectContaining({ path: 'notes.txt', kind: 'access_token' }),
+      expect.objectContaining({ path: 'identity.txt', kind: 'private_key' })
+    ]))
+  })
+
+  it('refuses to append ignore rules through a hard link to a file outside the project', async () => {
+    sandbox = await createSandbox()
+    const outside = join(sandbox.root, 'outside.txt')
+    await writeFile(outside, '# preserve this external file\n')
+    await link(outside, join(sandbox.projectPath, '.gitignore'))
+    await writeProjectFile(sandbox, '.env', fakeAssignment('API_KEY'))
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const scan = await sandbox.service.scanSensitiveFiles(project.id)
+    const envRisk = scan.risks.find((item) => item.path === '.env')!
+
+    await expect(sandbox.service.ignoreSensitiveRisk(project.id, envRisk)).rejects.toMatchObject({ code: 'UNSAFE_GITIGNORE' })
+    expect(await readFile(outside, 'utf8')).toBe('# preserve this external file\n')
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses to follow a symbolic .gitignore link outside the project', async () => {
+    sandbox = await createSandbox()
+    const outside = join(sandbox.root, 'outside.txt')
+    await writeFile(outside, '# preserve this external file\n')
+    await symlink(outside, join(sandbox.projectPath, '.gitignore'))
+    await writeProjectFile(sandbox, '.env', fakeAssignment('API_KEY'))
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const scan = await sandbox.service.scanSensitiveFiles(project.id)
+    const envRisk = scan.risks.find((item) => item.path === '.env')!
+
+    await expect(sandbox.service.ignoreSensitiveRisk(project.id, envRisk)).rejects.toMatchObject({ code: 'UNSAFE_GITIGNORE' })
+    expect(await readFile(outside, 'utf8')).toBe('# preserve this external file\n')
   })
 })

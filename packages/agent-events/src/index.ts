@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { AgentEvent, AgentEventRecord, Checkpoint, FeatureChangeSummary, RecordAgentSummaryInput } from '@vibegit/shared'
-import { redactSecrets, VibeGitError } from '@vibegit/shared'
+import { parseRecordAgentSummary, redactSecrets, VibeGitError } from '@vibegit/shared'
 import { VibeGitDatabase } from '@vibegit/database'
 import { CheckpointEngine } from '@vibegit/checkpoint-engine'
 
@@ -89,6 +89,7 @@ export class AgentEventService {
   }
 
   async recordSummary(input: RecordAgentSummaryInput): Promise<void> {
+    input = parseRecordAgentSummary(input)
     const projectPath = await realpath(resolve(input.projectPath))
     const project = this.database.listProjects()
       .filter((candidate) => pathContains(candidate.path, projectPath))
@@ -100,20 +101,31 @@ export class AgentEventService {
       projectPath: project.path,
       agent: input.agent,
       ...(input.sessionId ? { sessionId: input.sessionId } : {}),
-      summary: input.summary,
+      summary: this.redactedSummary(input.summary),
       createdAt: new Date().toISOString()
     }
     await mkdir(this.summaryDirectory(), { recursive: true })
     await writeFile(join(this.summaryDirectory(), `${randomUUID()}.json`), JSON.stringify(record), 'utf8')
   }
 
-  private async consumeSummary(projectPath: string, agent: RecordAgentSummaryInput['agent'], sessionId?: string): Promise<FeatureChangeSummary | undefined> {
+  private redactedSummary(summary: FeatureChangeSummary): FeatureChangeSummary {
+    return {
+      ...(summary.overview ? { overview: redactSecrets(summary.overview) } : {}),
+      added: summary.added.map(redactSecrets),
+      improved: summary.improved.map(redactSecrets),
+      removed: summary.removed.map(redactSecrets)
+    }
+  }
+
+  private async findSummary(projectPath: string, agent: RecordAgentSummaryInput['agent'], sessionId?: string): Promise<{ summary: FeatureChangeSummary; paths: string[] } | undefined> {
     let candidates: Array<{ path: string; record: StoredAgentSummary }> = []
     try {
       const files = await readdir(this.summaryDirectory())
       candidates = (await Promise.all(files.filter((file) => file.endsWith('.json')).map(async (file) => {
         try {
-          const record = JSON.parse(await readFile(join(this.summaryDirectory(), file), 'utf8')) as StoredAgentSummary
+          const stored = JSON.parse(await readFile(join(this.summaryDirectory(), file), 'utf8')) as StoredAgentSummary
+          if (typeof stored.createdAt !== 'string' || Number.isNaN(Date.parse(stored.createdAt))) return undefined
+          const record: StoredAgentSummary = { ...parseRecordAgentSummary(stored), createdAt: stored.createdAt }
           return record.projectPath === projectPath && record.agent === agent && (sessionId ? record.sessionId === sessionId : !record.sessionId)
             ? { path: join(this.summaryDirectory(), file), record }
             : undefined
@@ -122,8 +134,7 @@ export class AgentEventService {
     } catch { return undefined }
     const selected = candidates.sort((left, right) => right.record.createdAt.localeCompare(left.record.createdAt))[0]
     if (!selected) return undefined
-    try { await unlink(selected.path) } catch { /* The checkpoint can still use the summary once. */ }
-    return selected.record.summary
+    return { summary: this.redactedSummary(selected.record.summary), paths: candidates.map((candidate) => candidate.path) }
   }
 
   async handle(input: AgentEvent, options: { enforceSummary?: boolean } = {}): Promise<AgentEventResult> {
@@ -213,7 +224,8 @@ export class AgentEventService {
 
       const started = this.database.getLatestAgentStart(project.id, input.agent, input.sessionId)
       const resolvedTaskText = taskText ?? started?.taskText
-      const featureSummary = await this.consumeSummary(project.path, input.agent, input.sessionId)
+      const queuedSummary = await this.findSummary(project.path, input.agent, input.sessionId)
+      const featureSummary = queuedSummary?.summary
       if (!featureSummary && options.enforceSummary && !input.stopHookActive && await this.checkpoints.hasPendingChanges(project.id)) {
         if (reservationId) this.database.deleteAgentEventReservation(reservationId)
         return {
@@ -269,6 +281,9 @@ export class AgentEventService {
           : input.success === undefined ? '本轮已结束，但没有检测到文件变化（任务状态未知）' : '任务完成，但没有检测到文件变化'
       }
       persist(record)
+      // Retain the summary on checkpoint/metadata failure so a retry can attach
+      // it. Discard superseded submissions only after the event is durable.
+      if (queuedSummary) await Promise.all(queuedSummary.paths.map((path) => unlink(path).catch(() => undefined)))
       return { event: record, ...(checkpoint ? { checkpoint } : {}), changed: Boolean(checkpoint) }
     } catch (error) {
       if (reservationId) this.database.deleteAgentEventReservation(reservationId)

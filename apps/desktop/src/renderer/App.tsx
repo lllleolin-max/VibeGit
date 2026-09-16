@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import {
   AlertTriangle,
   Archive,
@@ -49,6 +49,7 @@ import type {
   CheckpointDiff,
   EnvironmentCheckResult,
   FeatureChangeSummary,
+  GitHubAuthorizationState,
   GitHubCliStatus,
   Project,
   PublicError,
@@ -60,6 +61,17 @@ import type {
 } from '@vibegit/shared'
 
 type Page = 'projects' | 'project' | 'settings'
+type ProjectCheck = { state: 'checking' | 'checked' | 'failed'; error?: PublicError }
+type ProjectChecks = Record<string, ProjectCheck | undefined>
+
+function projectStatusLabel(project: Project, check?: ProjectCheck): string {
+  if (!project.protectionEnabled) return '尚未开启版本保护'
+  if (!check) return '工作区状态待检查'
+  if (check.state === 'checking') return '正在检查工作区…'
+  if (check.state === 'failed') return '工作区检查失败'
+  return project.hasUnsavedChanges ? '有尚未保存的修改' : '当前版本已保存'
+}
+
 type Modal =
   | { kind: 'save' }
   | { kind: 'restore'; preview: RestorePreview; checkpoint: Checkpoint }
@@ -91,6 +103,41 @@ const RENDERED_TEXT_BY_NODE = new WeakMap<Text, string>()
 type TranslationSet = Partial<Record<DisplayLanguage, string>>
 
 const UI_TRANSLATIONS: Record<string, TranslationSet> = {
+  '上次 GitHub 备份失败': { en: 'Last GitHub backup failed' },
+  '上次 GitHub 备份成功': { en: 'Last GitHub backup succeeded' },
+  '上次备份失败': { en: 'Last backup failed' },
+  '上次备份成功': { en: 'Last backup succeeded' },
+  '打开查看连接并重试': { en: 'Open to check the connection and retry' },
+  '正在检查 GitHub 连接…': { en: 'Checking the GitHub connection…' },
+  'GitHub 连接检查失败': { en: 'GitHub connection check failed' },
+  '检查并修复 GitHub 连接': { en: 'Check and repair GitHub connection' },
+  '重新检查连接': { en: 'Check connection again' },
+  '连接 GitHub 并创建 SSH 密钥': { en: 'Connect GitHub and set up SSH' },
+  '仅向你的账户关联 VibeGit 专用公钥。密钥被撤销或连接失效时，可在这里修复。': { en: 'Only a dedicated VibeGit public key is linked to your account. Repair revoked keys or broken connections here.' },
+  '请在“设置 → 配置环境”安装 GitHub CLI，然后重新检查连接。': { en: 'Install GitHub CLI in Settings → Environment, then check the connection again.' },
+  '正在检查并关联 VibeGit 专用 SSH 密钥…': { en: 'Checking and linking the dedicated VibeGit SSH key…' },
+  'GitHub 连接检查已完成': { en: 'GitHub connection check completed' },
+  'GitHub 连接未完成，请重试': { en: 'GitHub connection was not completed. Please retry.' },
+  '请在 GitHub 授权页面完成确认，完成后会自动继续。': { en: 'Confirm on the GitHub authorization page. Setup continues automatically afterward.' },
+  '打开 GitHub 授权页面': { en: 'Open GitHub authorization page' },
+  '在 GitHub 输入一次性授权码：': { en: 'Enter this one-time code on GitHub:' },
+  '正在等待一次性授权码…': { en: 'Waiting for a one-time authorization code…' },
+  '暂时无法读取授权进度，授权仍在进行，请保留此窗口。': { en: 'Authorization progress is temporarily unavailable. Keep this window open while authorization continues.' },
+  '支持 HTTPS 或 SSH 地址；验证为 Private 后，使用 VibeGit 专用密钥备份。': { en: 'Paste an HTTPS or SSH address. VibeGit verifies the repository is private and backs up using its dedicated key.' },
+  '正在扫描项目文件，连接 GitHub 无需等待扫描完成…': { en: 'Scanning project files. You can connect GitHub while the scan runs…' },
+  '尚未完成安全检查': { en: 'Safety check is not complete' },
+  '正在保存保护点、核验风险并上传，请保留此窗口…': { en: 'Saving a checkpoint, checking risks, and uploading. Keep this window open…' },
+  '本次备份已完成，已同步到 GitHub。': { en: 'This backup is complete and has been uploaded to GitHub.' },
+  '本次备份已完成': { en: 'Backup completed' },
+  '尚未开启版本保护': { en: 'Version protection is not enabled' },
+  '正在读取保存记录…': { en: 'Loading checkpoints…' },
+  '保存记录暂时无法读取': { en: 'Checkpoints could not be loaded' },
+  '重新读取': { en: 'Retry' },
+  '代码变更暂时无法读取': { en: 'Code changes could not be loaded' },
+  '重新读取代码变更': { en: 'Retry loading code changes' },
+  '备份安全检查未完成': { en: 'Backup safety check did not complete' },
+  '重新检查': { en: 'Retry safety check' },
+  '读取失败': { en: 'Could not load' },
   '所有项目': { 'zh-TW': '所有專案', en: 'All projects', ja: 'すべてのプロジェクト', ko: '모든 프로젝트', ru: 'Все проекты', ar: 'كل المشاريع' },
   '最近项目': { 'zh-TW': '最近專案', en: 'Recent projects', ja: '最近のプロジェクト', ko: '최근 프로젝트', ru: 'Недавние проекты', ar: 'المشاريع الأخيرة' },
   '添加项目': { 'zh-TW': '新增專案', en: 'Add project', ja: 'プロジェクトを追加', ko: '프로젝트 추가', ru: 'Добавить проект', ar: 'إضافة مشروع' },
@@ -349,6 +396,8 @@ function featureSummaryOf(checkpoint: Checkpoint): FeatureChangeSummary | undefi
 
 export function App(): ReactNode {
   const [projects, setProjects] = useState<Project[]>([])
+  const [projectChecks, setProjectChecks] = useState<ProjectChecks>({})
+  const projectCheckRequests = useRef(new Map<string, number>())
   const [selectedId, setSelectedId] = useState<string>()
   const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([])
   const [agentEvents, setAgentEvents] = useState<AgentEventRecord[]>([])
@@ -361,6 +410,13 @@ export function App(): ReactNode {
   const [selectedCheckpoint, setSelectedCheckpoint] = useState<Checkpoint>()
   const [diff, setDiff] = useState<CheckpointDiff>()
   const [diffLoading, setDiffLoading] = useState(false)
+  const [diffError, setDiffError] = useState<PublicError>()
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [timelineError, setTimelineError] = useState<PublicError>()
+  const [timelineProjectId, setTimelineProjectId] = useState<string>()
+  const selectedProjectId = useRef<string | undefined>(undefined)
+  const timelineRequest = useRef(0)
+  const diffRequest = useRef(0)
   const [modal, setModal] = useState<Modal>(null)
   const [displayLanguage, setDisplayLanguage] = useState<DisplayLanguage>(savedDisplayLanguage)
   const [changePresentation, setChangePresentation] = useState<ChangePresentation>(savedChangePresentation)
@@ -386,22 +442,69 @@ export function App(): ReactNode {
   }, [])
 
   const selectedProject = useMemo(() => projects.find((project) => project.id === selectedId), [projects, selectedId])
+  const reportError = useCallback((value: unknown) => setError(errorFrom(value)), [])
 
-  const loadProjects = useCallback(async () => {
-    const data = unwrap(await window.vibegit.listProjects())
-    setProjects(data)
-    return data
+  const checkProject = useCallback(async (projectId: string): Promise<void> => {
+    const request = (projectCheckRequests.current.get(projectId) ?? 0) + 1
+    projectCheckRequests.current.set(projectId, request)
+    setProjectChecks((current) => ({ ...current, [projectId]: { state: 'checking' } }))
+    try {
+      const updated = unwrap(await window.vibegit.refreshProject(projectId))
+      if (projectCheckRequests.current.get(projectId) !== request) return
+      // Match by ID so a slow check can never replace the newly selected project.
+      setProjects((current) => current.map((project) => project.id === projectId ? updated : project))
+      setProjectChecks((current) => ({ ...current, [projectId]: updated.worktreeStatus === 'unknown' ? undefined : { state: 'checked' } }))
+    } catch (value) {
+      if (projectCheckRequests.current.get(projectId) !== request) return
+      setProjectChecks((current) => ({ ...current, [projectId]: { state: 'failed', error: errorFrom(value) } }))
+    }
   }, [])
 
+  const loadProjects = useCallback(async (changedProjectId?: string) => {
+    if (changedProjectId) {
+      projectCheckRequests.current.set(changedProjectId, (projectCheckRequests.current.get(changedProjectId) ?? 0) + 1)
+      setProjectChecks((current) => ({ ...current, [changedProjectId]: undefined }))
+    }
+    const data = unwrap(await window.vibegit.listProjects())
+    setProjects((current) => data.map((project) => {
+      const previous = current.find((entry) => entry.id === project.id)
+      if (!previous || project.id === changedProjectId || project.worktreeStatus === 'checked') return project
+      // Database listings do not inspect the worktree; retain the last explicit check.
+      return { ...project, hasUnsavedChanges: previous.hasUnsavedChanges, untrackedFiles: previous.untrackedFiles, ...(previous.worktreeStatus ? { worktreeStatus: previous.worktreeStatus } : {}) }
+    }))
+    if (changedProjectId) void checkProject(changedProjectId)
+    return data
+  }, [checkProject])
+
   const loadTimeline = useCallback(async (projectId: string) => {
-    const [checkpointResult, agentEventResult, failedRestoreResult] = await Promise.all([
-      window.vibegit.listCheckpoints(projectId),
-      window.vibegit.listAgentEvents(projectId),
-      window.vibegit.listFailedRestores(projectId)
-    ])
-    setCheckpoints(unwrap(checkpointResult))
-    setAgentEvents(unwrap(agentEventResult))
-    setFailedRestores(unwrap(failedRestoreResult))
+    if (selectedProjectId.current !== projectId) return
+    const request = ++timelineRequest.current
+    try {
+      const results = await Promise.all([
+        window.vibegit.listCheckpoints(projectId),
+        window.vibegit.listAgentEvents(projectId),
+        window.vibegit.listFailedRestores(projectId)
+      ])
+      if (request !== timelineRequest.current || selectedProjectId.current !== projectId) return
+      const nextCheckpoints = unwrap(results[0])
+      const nextEvents = unwrap(results[1])
+      const nextRestores = unwrap(results[2])
+      setTimelineError(undefined)
+      setCheckpoints(nextCheckpoints)
+      setAgentEvents(nextEvents)
+      setFailedRestores(nextRestores)
+    } catch (value) {
+      if (request !== timelineRequest.current || selectedProjectId.current !== projectId) return
+      setCheckpoints([])
+      setAgentEvents([])
+      setFailedRestores([])
+      setTimelineError(errorFrom(value))
+    } finally {
+      if (request === timelineRequest.current && selectedProjectId.current === projectId) {
+        setTimelineProjectId(projectId)
+        setTimelineLoading(false)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -418,22 +521,20 @@ export function App(): ReactNode {
   }, [loadProjects])
 
   useEffect(() => {
+    selectedProjectId.current = selectedId
     if (!selectedId) return
-    let active = true
-    void Promise.all([
-      window.vibegit.listCheckpoints(selectedId),
-      window.vibegit.listAgentEvents(selectedId),
-      window.vibegit.listFailedRestores(selectedId)
-    ])
-      .then(([checkpointResult, agentEventResult, failedRestoreResult]) => {
-        if (!active) return
-        setCheckpoints(unwrap(checkpointResult))
-        setAgentEvents(unwrap(agentEventResult))
-        setFailedRestores(unwrap(failedRestoreResult))
-      })
-      .catch((value: unknown) => { if (active) setError(errorFrom(value)) })
-    return () => { active = false }
-  }, [selectedId])
+    // Timeline and worktree checks finish independently of the cached project list.
+    void loadTimeline(selectedId)
+    void checkProject(selectedId)
+    return () => { timelineRequest.current += 1 }
+  }, [selectedId, loadTimeline, checkProject])
+
+  const closeCheckpoint = (): void => {
+    diffRequest.current += 1
+    setSelectedCheckpoint(undefined)
+    setDiff(undefined)
+    setDiffError(undefined)
+  }
 
   const addProjectPath = async (path: string): Promise<void> => {
     setBusy('add-project')
@@ -453,6 +554,7 @@ export function App(): ReactNode {
   }
 
   const chooseProject = async (): Promise<void> => {
+    if (busy) return
     setBusy('add-project')
     setError(undefined)
     try {
@@ -468,8 +570,8 @@ export function App(): ReactNode {
 
   const selectProject = (project: Project): void => {
     setSelectedId(project.id)
-    setSelectedCheckpoint(undefined)
-    setDiff(undefined)
+    closeCheckpoint()
+    setModal(null)
     setPage('project')
   }
 
@@ -538,7 +640,7 @@ export function App(): ReactNode {
     setError(undefined)
     try {
       unwrap(await window.vibegit.initializeProtection(selectedProject.id))
-      await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
+      await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
       setNotice({ message: '版本保护已开启，初始保存点创建成功' })
     } catch (value) {
       setError(errorFrom(value))
@@ -549,24 +651,26 @@ export function App(): ReactNode {
 
   const refreshProject = async (): Promise<void> => {
     if (!selectedProject) return
-    setBusy('refresh')
-    try {
-      unwrap(await window.vibegit.refreshProject(selectedProject.id))
-      await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
-    } catch (value) {
-      setError(errorFrom(value))
-    } finally {
-      setBusy(undefined)
-    }
+    setTimelineLoading(true)
+    // History is independently available even while a large working tree scans.
+    void checkProject(selectedProject.id)
+    await loadTimeline(selectedProject.id)
   }
 
   const openCheckpoint = async (checkpoint: Checkpoint): Promise<void> => {
+    const request = ++diffRequest.current
     setSelectedCheckpoint(checkpoint)
     setDiff(undefined)
+    setDiffError(undefined)
     setDiffLoading(true)
-    try { setDiff(unwrap(await window.vibegit.getCheckpointDiff(checkpoint.id))) }
-    catch (value) { setError(errorFrom(value)) }
-    finally { setDiffLoading(false) }
+    try {
+      const nextDiff = unwrap(await window.vibegit.getCheckpointDiff(checkpoint.id))
+      if (request === diffRequest.current) setDiff(nextDiff)
+    } catch (value) {
+      if (request === diffRequest.current) setDiffError(errorFrom(value))
+    } finally {
+      if (request === diffRequest.current) setDiffLoading(false)
+    }
   }
 
   const prepareRestore = async (checkpoint: Checkpoint): Promise<void> => {
@@ -591,7 +695,7 @@ export function App(): ReactNode {
       const restore = unwrap(await window.vibegit.executeRestore(preview.token))
       setModal(null)
       setNotice({ message: '已回到所选版本；回退前内容仍可找回', restore })
-      await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
+      await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
     } catch (value) {
       setError(errorFrom(value))
       setModal(null)
@@ -616,7 +720,7 @@ export function App(): ReactNode {
     try {
       unwrap(await window.vibegit.undoRestore(restore.id))
       setNotice({ message: '已撤销本次回退，文件恢复到回退前状态' })
-      await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
+      await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
     } catch (value) {
       setError(errorFrom(value))
     } finally {
@@ -626,10 +730,11 @@ export function App(): ReactNode {
 
   return (
     <div className="app-frame">
-      <AppTitleBar />
+      <AppTitleBar onError={reportError} />
       <div className="app-shell">
       <Sidebar
         projects={projects}
+        projectChecks={projectChecks}
         selectedId={selectedId}
         page={page}
         busy={busy}
@@ -661,13 +766,16 @@ export function App(): ReactNode {
             <EnvironmentPreferences />
           </>
         ) : page === 'projects' || !selectedProject ? (
-          <ProjectsHome projects={projects} busy={busy} onAdd={() => void chooseProject()} onSelect={selectProject} />
+          <ProjectsHome projects={projects} projectChecks={projectChecks} busy={busy} onAdd={() => void chooseProject()} onSelect={selectProject} />
         ) : (
           <ProjectWorkspace
             project={selectedProject}
-            checkpoints={checkpoints}
-            agentEvents={agentEvents}
-            failedRestores={failedRestores}
+            projectCheck={projectChecks[selectedProject.id]}
+            checkpoints={timelineProjectId === selectedId ? checkpoints : []}
+            agentEvents={timelineProjectId === selectedId ? agentEvents : []}
+            failedRestores={timelineProjectId === selectedId ? failedRestores : []}
+            loading={timelineLoading || timelineProjectId !== selectedId}
+            error={timelineProjectId === selectedId ? timelineError : undefined}
             changePresentation={changePresentation}
             busy={busy}
             onInitialize={() => void initializeProtection()}
@@ -687,9 +795,11 @@ export function App(): ReactNode {
           checkpoint={selectedCheckpoint}
           diff={diff}
           loading={diffLoading}
+          error={diffError}
           busy={busy}
           changePresentation={changePresentation}
-          onClose={() => { setSelectedCheckpoint(undefined); setDiff(undefined) }}
+          onClose={closeCheckpoint}
+          onRetry={() => void openCheckpoint(selectedCheckpoint)}
           onRestore={() => void prepareRestore(selectedCheckpoint)}
         />
       )}
@@ -711,7 +821,7 @@ export function App(): ReactNode {
               }))
               setModal(null)
               setNotice({ message: '当前版本已安全保存' })
-              await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
+              await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
             } catch (value) { setError(errorFrom(value)) }
             finally { setBusy(undefined) }
           }}
@@ -731,21 +841,22 @@ export function App(): ReactNode {
           project={selectedProject}
           onClose={() => setModal(null)}
           onChanged={async (message) => {
-            await Promise.all([loadProjects(), loadTimeline(selectedProject.id)])
+            await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
             setNotice({ message })
           }}
-          onError={(value) => setError(errorFrom(value))}
+          onError={reportError}
         />
       )}
       {modal?.kind === 'backup' && selectedProject && (
         <BackupModal
+          key={selectedProject.id}
           project={selectedProject}
           onClose={() => setModal(null)}
           onProjectChange={async () => {
-            await loadProjects()
+            await loadProjects(selectedProject.id)
           }}
           onSuccess={(message) => setNotice({ message })}
-          onError={(value) => setError(errorFrom(value))}
+          onError={reportError}
         />
       )}
       {modal?.kind === 'remove-project' && (
@@ -777,19 +888,23 @@ export function App(): ReactNode {
   )
 }
 
-function AppTitleBar(): ReactNode {
-  return <header className="app-titlebar" onDoubleClick={() => void window.vibegit.toggleMaximizeWindow()}>
+function AppTitleBar({ onError }: { onError(value: unknown): void }): ReactNode {
+  const run = async (action: () => Promise<ApiResult<boolean>>): Promise<void> => {
+    try { unwrap(await action()) } catch (value) { onError(value) }
+  }
+  return <header className="app-titlebar" onDoubleClick={() => void run(() => window.vibegit.toggleMaximizeWindow())}>
     <div className="app-titlebar-brand"><img src={appLogo} alt="" /><span>VibeGit</span></div>
     <div className="window-controls">
-      <button aria-label="最小化窗口" onClick={() => void window.vibegit.minimizeWindow()}><Minus size={17} /></button>
-      <button aria-label="最大化或还原窗口" onClick={() => void window.vibegit.toggleMaximizeWindow()}><Maximize2 size={15} /></button>
-      <button className="window-close" aria-label="关闭窗口" onClick={() => void window.vibegit.closeWindow()}><X size={17} /></button>
+      <button aria-label="最小化窗口" onClick={() => void run(() => window.vibegit.minimizeWindow())}><Minus size={17} /></button>
+      <button aria-label="最大化或还原窗口" onClick={() => void run(() => window.vibegit.toggleMaximizeWindow())}><Maximize2 size={15} /></button>
+      <button className="window-close" aria-label="关闭窗口" onClick={() => void run(() => window.vibegit.closeWindow())}><X size={17} /></button>
     </div>
   </header>
 }
 
 function Sidebar(props: {
   projects: Project[]
+  projectChecks: ProjectChecks
   selectedId?: string | undefined
   page: Page
   busy?: string | undefined
@@ -805,13 +920,13 @@ function Sidebar(props: {
       <nav className="primary-nav" aria-label="主导航">
         <button className={props.page === 'projects' ? 'active' : ''} onClick={props.onProjects}><FolderHeart size={17} />所有项目</button>
       </nav>
-      <div className="sidebar-section-title"><span>最近项目</span><span className="sidebar-section-actions"><button aria-label="添加项目" onClick={props.onAdd}><Plus size={15} /></button><button aria-label={managingProjects ? '结束管理项目' : '管理项目备份'} disabled={props.projects.length === 0} className={managingProjects ? 'active' : ''} onClick={() => setManagingProjects((current) => !current)}><Minus size={15} /></button></span></div>
+      <div className="sidebar-section-title"><span>最近项目</span><span className="sidebar-section-actions"><button aria-label="添加项目" onClick={props.onAdd} disabled={Boolean(props.busy)}><Plus size={15} /></button><button aria-label={managingProjects ? '结束管理项目' : '管理项目备份'} disabled={props.projects.length === 0} className={managingProjects ? 'active' : ''} onClick={() => setManagingProjects((current) => !current)}><Minus size={15} /></button></span></div>
       <div className="project-nav-list">
         {props.projects.length === 0 ? <p className="sidebar-empty">添加第一个项目后，它会出现在这里。</p> : props.projects.map((project) => (
           <div className={`project-nav-row ${props.selectedId === project.id && props.page === 'project' ? 'active' : ''} ${managingProjects ? 'managing' : ''}`} key={project.id}>
             <button className="project-nav-main" onClick={() => props.onSelect(project)}>
-              <span className={`project-dot ${project.hasUnsavedChanges ? 'unsaved' : 'safe'}`} />
-              <span className="project-nav-copy"><strong>{project.name}</strong><small>{project.hasUnsavedChanges ? '有尚未保存的修改' : '当前版本已保存'}</small></span>
+              <span className={`project-dot ${!project.protectionEnabled || props.projectChecks[project.id]?.state !== 'checked' ? '' : project.hasUnsavedChanges ? 'unsaved' : 'safe'}`} />
+              <span className="project-nav-copy"><strong>{project.name}</strong><small>{projectStatusLabel(project, props.projectChecks[project.id])}</small></span>
             </button>
             {managingProjects && <button className="project-remove-button" aria-label={`删除 ${project.name} 的本地备份`} title="删除本地备份" onClick={() => props.onRemove(project)}><Trash2 size={14} /></button>}
           </div>
@@ -825,7 +940,7 @@ function Sidebar(props: {
   )
 }
 
-function ProjectsHome(props: { projects: Project[]; busy?: string | undefined; onAdd(): void; onSelect(project: Project): void }): ReactNode {
+function ProjectsHome(props: { projects: Project[]; projectChecks: ProjectChecks; busy?: string | undefined; onAdd(): void; onSelect(project: Project): void }): ReactNode {
   return (
     <section className="page projects-page">
       <header className="page-header">
@@ -838,28 +953,28 @@ function ProjectsHome(props: { projects: Project[]; busy?: string | undefined; o
         <div className="welcome-card">
           <div className="welcome-visual"><img className="welcome-app-logo" src={appLogo} alt="" /><Sparkles size={22} /></div>
           <div><span className="pill neutral">首次使用</span><h2>先选择一个正在用 AI 开发的文件夹</h2><p>我们不会上传或删除文件。开启保护后，会为当前状态建立第一个保存点。</p>
-            <button className="button primary large" onClick={props.onAdd}><FolderOpen size={18} />选择项目文件夹</button>
+            <button className="button primary large" onClick={props.onAdd} disabled={Boolean(props.busy)}><FolderOpen size={18} />选择项目文件夹</button>
           </div>
           <ol className="welcome-steps"><li><span>1</span>添加项目</li><li><span>2</span>开启版本保护</li><li><span>3</span>放心让 Agent 修改</li></ol>
         </div>
       ) : (
         <div className="project-grid">
-          {props.projects.map((project) => <ProjectCard key={project.id} project={project} onClick={() => props.onSelect(project)} />)}
-          <button className="add-project-card" onClick={props.onAdd}><Plus size={22} /><strong>添加另一个项目</strong><span>选择本地文件夹</span></button>
+          {props.projects.map((project) => <ProjectCard key={project.id} project={project} projectCheck={props.projectChecks[project.id]} onClick={() => props.onSelect(project)} />)}
+          <button className="add-project-card" onClick={props.onAdd} disabled={Boolean(props.busy)}><Plus size={22} /><strong>添加另一个项目</strong><span>选择本地文件夹</span></button>
         </div>
       )}
     </section>
   )
 }
 
-function ProjectCard({ project, onClick }: { project: Project; onClick(): void }): ReactNode {
+function ProjectCard({ project, projectCheck, onClick }: { project: Project; projectCheck?: ProjectCheck | undefined; onClick(): void }): ReactNode {
   return (
     <button className="project-card" onClick={onClick}>
       <div className="project-card-top"><span className="folder-icon"><FolderHeart size={21} /></span><ChevronRight size={18} /></div>
       <h3>{project.name}</h3><p className="path-text" title={project.path}>{project.path}</p>
       <div className="project-card-status">
-        <span className={`status-line ${project.hasUnsavedChanges ? 'warning' : 'safe'}`}>{project.hasUnsavedChanges ? <Clock3 size={15} /> : <CheckCircle2 size={15} />}{project.hasUnsavedChanges ? '有尚未保存的修改' : '当前版本已保存'}</span>
-        <span className="status-line muted"><Cloud size={15} />{project.githubSyncStatus === 'synced' ? '已备份到 GitHub' : project.githubRemoteUrl ? '有尚未备份的保存点' : '尚未设置 GitHub 备份'}</span>
+        <span className={`status-line ${!project.protectionEnabled || project.hasUnsavedChanges ? 'warning' : projectCheck?.state === 'checked' ? 'safe' : 'muted'}`}>{!project.protectionEnabled ? <ShieldAlert size={15} /> : projectCheck?.state === 'checking' ? <LoaderCircle className="spin" size={15} /> : projectCheck?.state !== 'checked' || project.hasUnsavedChanges ? <Clock3 size={15} /> : <CheckCircle2 size={15} />}{projectStatusLabel(project, projectCheck)}</span>
+        <span className={`status-line ${project.githubSyncStatus === 'failed' ? 'warning' : 'muted'}`}><Cloud size={15} />{project.githubSyncStatus === 'failed' ? '上次 GitHub 备份失败' : project.githubSyncStatus === 'synced' ? '上次 GitHub 备份成功' : project.githubRemoteUrl ? '有尚未备份的保存点' : '尚未设置 GitHub 备份'}</span>
       </div>
       <div className="project-card-meta"><span>最近保存 {formatRelativeTime(project.lastCheckpointAt)}</span><span>{project.lastAgent ? `由 ${agentLabel(project.lastAgent)}` : '尚无 Agent 记录'}</span></div>
     </button>
@@ -868,9 +983,12 @@ function ProjectCard({ project, onClick }: { project: Project; onClick(): void }
 
 function ProjectWorkspace(props: {
   project: Project
+  projectCheck?: ProjectCheck | undefined
   checkpoints: Checkpoint[]
   agentEvents: AgentEventRecord[]
   failedRestores: RestoreRecord[]
+  loading: boolean
+  error?: PublicError | undefined
   changePresentation: ChangePresentation
   busy?: string | undefined
   onInitialize(): void
@@ -889,10 +1007,10 @@ function ProjectWorkspace(props: {
       <header className="workspace-header">
         <div className="workspace-title"><span className="folder-icon large"><FolderHeart size={23} /></span><div><div className="title-row"><h1>{project.name}</h1>{project.protectionEnabled && <span className="pill safe"><ShieldCheck size={13} />保护中</span>}</div><p title={project.path}>{project.path}</p></div></div>
         <div className="header-actions">
-          <button className="button ghost" aria-label="刷新项目状态" onClick={props.onRefresh} disabled={props.busy === 'refresh'}><RefreshCw className={props.busy === 'refresh' ? 'spin' : ''} size={16} /></button>
-          <button className="button ghost" onClick={props.onShelf} disabled={!project.protectionEnabled}><Archive size={16} />暂时收起</button>
-          <button className="button secondary" onClick={props.onBackup}><Cloud size={16} />GitHub 备份</button>
-          <button className="button primary" onClick={props.onSave} disabled={!project.protectionEnabled}><Save size={16} />创建保存点</button>
+          <button className="button ghost" aria-label="刷新项目状态" onClick={props.onRefresh} disabled={Boolean(props.busy)}><RefreshCw className={props.projectCheck?.state === 'checking' ? 'spin' : ''} size={16} /></button>
+          <button className="button ghost" onClick={props.onShelf} disabled={!project.protectionEnabled || Boolean(props.busy)}><Archive size={16} />暂时收起</button>
+          <button className="button secondary" onClick={props.onBackup} disabled={Boolean(props.busy)}><Cloud size={16} />GitHub 备份</button>
+          <button className="button primary" onClick={props.onSave} disabled={!project.protectionEnabled || Boolean(props.busy)}><Save size={16} />创建保存点</button>
         </div>
       </header>
 
@@ -901,21 +1019,21 @@ function ProjectWorkspace(props: {
           <div className="protection-icon"><Shield size={34} /></div>
           <div><span className="pill warning">尚未保护</span><h2>为这个项目开启版本保护</h2><p>VibeGit 会初始化本地版本记录并创建初始保存点，不会上传文件，也不会改变你的工作方式。</p>
             <div className="setup-guarantees"><span><Check size={15} />文件安全不丢失</span><span><Check size={15} />Git 操作一键完成</span><span><Check size={15} />修改记录随时回退</span></div>
-            <button className="button primary large" onClick={props.onInitialize} disabled={props.busy === 'initialize'}>{props.busy === 'initialize' ? <LoaderCircle className="spin" size={18} /> : <ShieldCheck size={18} />}开启版本保护</button>
+            <button className="button primary large" onClick={props.onInitialize} disabled={Boolean(props.busy)}>{props.busy === 'initialize' ? <LoaderCircle className="spin" size={18} /> : <ShieldCheck size={18} />}开启版本保护</button>
           </div>
         </div>
       ) : (
         <>
           <div className="status-strip">
-            <div className={project.hasUnsavedChanges ? 'status-card amber' : 'status-card green'}>{project.hasUnsavedChanges ? <Clock3 size={20} /> : <ShieldCheck size={20} />}<span><strong>{project.hasUnsavedChanges ? '有新的修改' : '当前版本已保存'}</strong><small>{project.hasUnsavedChanges ? '建议在继续让 AI 修改前创建保存点' : `最近保存 ${formatRelativeTime(project.lastCheckpointAt)}`}</small></span></div>
+            <div className={props.projectCheck?.state !== 'checked' ? 'status-card neutral' : project.hasUnsavedChanges ? 'status-card amber' : 'status-card green'}>{props.projectCheck?.state === 'checking' ? <LoaderCircle className="spin" size={20} /> : props.projectCheck?.state !== 'checked' || project.hasUnsavedChanges ? <Clock3 size={20} /> : <ShieldCheck size={20} />}<span><strong>{projectStatusLabel(project, props.projectCheck)}</strong><small>{props.projectCheck?.state === 'failed' ? `${props.projectCheck.error?.message ?? '无法检查当前文件'}；点击右上角刷新重试` : props.projectCheck?.state !== 'checked' ? '保存记录已载入；工作区检查不影响查看历史' : project.hasUnsavedChanges ? '建议在继续让 AI 修改前创建保存点' : `最近保存 ${formatRelativeTime(project.lastCheckpointAt)}`}</small></span></div>
             <div className="status-card neutral"><Sparkles size={20} /><span><strong>{project.lastAgent ? agentLabel(project.lastAgent) : 'Agent 尚未连接'}</strong><small>{project.lastAgent ? '最近修改来源' : '可在设置中查看连接方法'}</small></span></div>
-            <button className="status-card neutral clickable" onClick={props.onBackup}><Cloud size={20} /><span><strong>{project.githubSyncStatus === 'synced' ? '已安全备份' : project.githubRemoteUrl ? '等待备份' : '尚未设置备份'}</strong><small>{project.githubSyncStatus === 'synced' ? formatRelativeTime(project.lastSyncedAt) : '备份到你的 GitHub 私有仓库'}</small></span><ChevronRight size={17} /></button>
+            <button className="status-card neutral clickable" onClick={props.onBackup} disabled={Boolean(props.busy)}><Cloud size={20} /><span><strong>{project.githubSyncStatus === 'failed' ? '上次备份失败' : project.githubSyncStatus === 'synced' ? '上次备份成功' : project.githubRemoteUrl ? '等待备份' : '尚未设置备份'}</strong><small>{project.githubSyncStatus === 'failed' ? '打开查看连接并重试' : project.githubSyncStatus === 'synced' ? formatRelativeTime(project.lastSyncedAt) : '备份到你的 GitHub 私有仓库'}</small></span><ChevronRight size={17} /></button>
           </div>
           <div className="timeline-layout">
             <div className="timeline-heading"><div><p className="eyebrow">项目时间线</p><h2>你的安全保存记录</h2></div><span>{props.checkpoints.length} 个保存点</span></div>
             {latestNoChange && <div className="agent-no-change" role="status"><CheckCircle2 size={17} /><div><strong>任务完成，但没有检测到文件变化</strong><small>{agentLabel(latestNoChange.agent)}{latestNoChange.taskText ? `：${latestNoChange.taskText}` : ' 本轮没有需要保存的新文件内容。'}</small></div></div>}
             {props.failedRestores.map((restore) => <div className="restore-recovery-alert" key={restore.id} role="alert"><AlertTriangle size={18} /><div><strong>有一次未完成的回退需要留意</strong><small>保险点仍在；如有已移动的文件，它们保存在恢复区，可随时打开查看。</small></div><button className="button ghost" onClick={() => void window.vibegit.openRecoveryDirectory(restore.id)}><FolderOpen size={15} />打开恢复区</button></div>)}
-            {props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} changePresentation={props.changePresentation} onOpen={props.onOpenCheckpoint} onRename={props.onRenameCheckpoint} onDelete={props.onDeleteCheckpoint} />}
+            {props.loading ? <LoadingView compact label="正在读取保存记录…" /> : props.error ? <div className="empty-state" role="alert"><AlertTriangle size={26} /><h3>保存记录暂时无法读取</h3><p>{props.error.message}</p><button className="button secondary" onClick={props.onRefresh}>重新读取</button></div> : props.checkpoints.length === 0 ? <EmptyTimeline onSave={props.onSave} /> : <Timeline checkpoints={props.checkpoints} changePresentation={props.changePresentation} onOpen={props.onOpenCheckpoint} onRename={props.onRenameCheckpoint} onDelete={props.onDeleteCheckpoint} />}
           </div>
         </>
       )}
@@ -950,11 +1068,33 @@ function Timeline({ checkpoints, changePresentation, onOpen, onRename, onDelete 
 
 function CheckpointActions({ checkpoint, onRename, onDelete }: { checkpoint: Checkpoint; onRename(checkpoint: Checkpoint): void; onDelete(checkpoint: Checkpoint): void }): ReactNode {
   const [open, setOpen] = useState(false)
-  return <div className="checkpoint-actions">
-    <button className="checkpoint-menu-trigger" aria-label="打开保存点操作菜单" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={18} /></button>
+  const container = useRef<HTMLDivElement>(null)
+  const trigger = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (!open) return
+    container.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+    const dismiss = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !container.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('pointerdown', dismiss)
+    return () => document.removeEventListener('pointerdown', dismiss)
+  }, [open])
+  const closeMenu = (): void => { setOpen(false); trigger.current?.focus() }
+  return <div ref={container} className="checkpoint-actions" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false) }} onKeyDown={(event) => {
+    if (event.key === 'Escape') { event.preventDefault(); closeMenu() }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault()
+      if (!open) { setOpen(true); return }
+      const items = Array.from(container.current?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])
+      const index = items.indexOf(document.activeElement as HTMLElement)
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+      items[next]?.focus()
+    }
+  }}>
+    <button ref={trigger} className="checkpoint-menu-trigger" aria-label="打开保存点操作菜单" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => !value)}><MoreHorizontal size={18} /></button>
     {open && <div className="checkpoint-menu" role="menu" aria-label={`${checkpoint.title} 的操作`}>
-      <button role="menuitem" onClick={() => { setOpen(false); onRename(checkpoint) }}><Pencil size={15} />重命名保存点</button>
-      <button className="danger" role="menuitem" onClick={() => { setOpen(false); onDelete(checkpoint) }}><Trash2 size={15} />删除保存点</button>
+      <button role="menuitem" onClick={() => { closeMenu(); onRename(checkpoint) }}><Pencil size={15} />重命名保存点</button>
+      <button className="danger" role="menuitem" onClick={() => { closeMenu(); onDelete(checkpoint) }}><Trash2 size={15} />删除保存点</button>
     </div>}
   </div>
 }
@@ -981,19 +1121,22 @@ function FeatureChangeView({ checkpoint }: { checkpoint: Checkpoint }): ReactNod
   </div>
 }
 
-function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff | undefined; loading: boolean; busy?: string | undefined; changePresentation: ChangePresentation; onClose(): void; onRestore(): void }): ReactNode {
+function CheckpointDrawer(props: { checkpoint: Checkpoint; diff?: CheckpointDiff | undefined; loading: boolean; error?: PublicError | undefined; busy?: string | undefined; changePresentation: ChangePresentation; onClose(): void; onRestore(): void; onRetry(): void }): ReactNode {
   const [activeFile, setActiveFile] = useState<string>()
+  const [presentation, setPresentation] = useState<ChangePresentation>()
+  const drawerRef = useDialogFocus(props.onClose, Boolean(props.busy))
   const current = props.diff?.files.find((file) => file.path === activeFile) ?? props.diff?.files[0]
   const type = checkpointType(props.checkpoint.type)
   return (
-    <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) props.onClose() }}>
-      <aside className="checkpoint-drawer" aria-label="保存点详情">
-        <header className="drawer-header"><button className="icon-button" aria-label="关闭详情" onClick={props.onClose}><X size={18} /></button><div><span className={`pill ${type.tone}`}>{type.label}</span><h2>{props.checkpoint.title}</h2><p>{new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(props.checkpoint.createdAt))} · {agentLabel(props.checkpoint.agent)}</p></div><button className="button danger-soft" onClick={props.onRestore} disabled={props.busy === `restore-${props.checkpoint.id}`}><RotateCcw size={16} />回到这个版本</button></header>
+    <div className="drawer-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !props.busy) props.onClose() }}>
+      <aside ref={drawerRef} className="checkpoint-drawer" role="dialog" aria-modal="true" aria-label="保存点详情" tabIndex={-1}>
+        <header className="drawer-header"><button className="icon-button" aria-label="关闭详情" disabled={Boolean(props.busy)} onClick={props.onClose}><X size={18} /></button><div><span className={`pill ${type.tone}`}>{type.label}</span><h2>{props.checkpoint.title}</h2><p>{new Intl.DateTimeFormat(document.documentElement.lang || 'zh-CN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(props.checkpoint.createdAt))} · {agentLabel(props.checkpoint.agent)}</p></div><button className="button danger-soft" onClick={props.onRestore} disabled={Boolean(props.busy)}><RotateCcw size={16} />回到这个版本</button></header>
         {props.checkpoint.taskText && <div className="task-summary"><Sparkles size={17} /><div><strong>当时交给 Agent 的任务</strong><p>{props.checkpoint.taskText}</p></div></div>}
         <div className="diff-summary"><span><FileCode2 size={16} />{props.checkpoint.changedFiles.length} 个文件</span><b>+{props.checkpoint.insertions}</b><em>−{props.checkpoint.deletions}</em></div>
-        {props.changePresentation === 'feature' ? <FeatureChangeView checkpoint={props.checkpoint} /> : props.loading ? <LoadingView label="正在整理这次修改…" compact /> : !props.diff || props.diff.files.length === 0 ? <div className="empty-diff"><CheckCircle2 size={26} /><strong>这个保存点没有文件内容变化</strong><span>它用于记录一个安全边界。</span></div> : (
+        <div className="drawer-view-controls" role="group" aria-label="改动显示方式"><button className="button ghost small" aria-pressed={(presentation ?? props.changePresentation) === 'feature'} onClick={() => setPresentation('feature')}>功能变化</button><button className="button ghost small" aria-pressed={(presentation ?? props.changePresentation) === 'code'} onClick={() => setPresentation('code')}>代码变更</button></div>
+        {(presentation ?? props.changePresentation) === 'feature' ? <FeatureChangeView checkpoint={props.checkpoint} /> : props.loading ? <LoadingView label="正在整理这次修改…" compact /> : props.error ? <div className="empty-diff" role="alert"><AlertTriangle size={26} /><strong>代码变更暂时无法读取</strong><span>{props.error.message}</span><button className="button secondary" onClick={props.onRetry}>重新读取代码变更</button></div> : !props.diff || props.diff.files.length === 0 ? <div className="empty-diff"><CheckCircle2 size={26} /><strong>这个保存点没有文件内容变化</strong><span>它用于记录一个安全边界。</span></div> : (
           <div className="diff-workspace">
-            <div className="file-list" role="listbox" aria-label="修改的文件">{props.diff.files.map((file) => <button key={file.path} className={(current?.path === file.path) ? 'active' : ''} onClick={() => setActiveFile(file.path)}><FileCode2 size={15} /><span>{file.path}</span><small className={file.kind}>{file.kind === 'added' ? '新增' : file.kind === 'deleted' ? '删除' : file.kind === 'renamed' ? '改名' : '修改'}</small></button>)}</div>
+            <div className="file-list" role="group" aria-label="修改的文件">{props.diff.files.map((file) => <button key={file.path} aria-pressed={current?.path === file.path} className={(current?.path === file.path) ? 'active' : ''} onClick={() => setActiveFile(file.path)}><FileCode2 size={15} /><span>{file.path}</span><small className={file.kind}>{file.kind === 'added' ? '新增' : file.kind === 'deleted' ? '删除' : file.kind === 'renamed' ? '改名' : '修改'}</small></button>)}</div>
             <div className="patch-panel">{current && <><div className="patch-header"><span>{current.path}</span><span><b>+{current.insertions}</b> <em>−{current.deletions}</em></span></div>{current.binary ? <div className="binary-note">这是二进制文件，无法显示逐行差异。</div> : <PatchView patch={current.patch} />}</>}</div>
           </div>
         )}
@@ -1023,9 +1166,9 @@ function SaveModal(props: { project: Project; busy: boolean; onClose(): void; on
   const [title, setTitle] = useState('当前可用版本')
   const [stable, setStable] = useState(false)
   const [note, setNote] = useState('')
-  const submit = (event: FormEvent): void => { event.preventDefault(); if (title.trim()) void props.onSave(title.trim(), stable, note.trim() || undefined) }
-  return <ModalFrame title="创建保存点" subtitle={`保存 ${props.project.name} 的当前状态，文件会继续留在原处。`} onClose={props.onClose}>
-    <form onSubmit={submit} className="modal-form"><label>给这个版本一个容易记住的名字<input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} placeholder="例如：邮箱验证码登录完成" /></label><label>备注（可选）<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="记录为什么保存这个版本" /></label><label className="check-row"><input type="checkbox" checked={stable} onChange={(event) => setStable(event.target.checked)} /><span><strong>标记为稳定版本</strong><small>表示这是你确认可以正常使用的版本</small></span></label><div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose}>取消</button><button className="button primary" disabled={props.busy || !title.trim()}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}保存当前版本</button></div></form>
+  const submit = (event: FormEvent): void => { event.preventDefault(); if (!props.busy && title.trim()) void props.onSave(title.trim(), stable, note.trim() || undefined) }
+  return <ModalFrame title="创建保存点" subtitle={`保存 ${props.project.name} 的当前状态，文件会继续留在原处。`} onClose={props.onClose} busy={props.busy}>
+    <form onSubmit={submit} className="modal-form"><label>给这个版本一个容易记住的名字<input data-autofocus value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} placeholder="例如：邮箱验证码登录完成" /></label><label>备注（可选）<textarea value={note} onChange={(event) => setNote(event.target.value)} rows={3} placeholder="记录为什么保存这个版本" /></label><label className="check-row"><input type="checkbox" checked={stable} onChange={(event) => setStable(event.target.checked)} /><span><strong>标记为稳定版本</strong><small>表示这是你确认可以正常使用的版本</small></span></label><div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose} disabled={props.busy}>取消</button><button className="button primary" disabled={props.busy || !title.trim()}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <Save size={17} />}保存当前版本</button></div></form>
   </ModalFrame>
 }
 
@@ -1033,26 +1176,26 @@ function RenameCheckpointModal(props: { checkpoint: Checkpoint; busy: boolean; o
   const [title, setTitle] = useState(props.checkpoint.title)
   const submit = (event: FormEvent): void => {
     event.preventDefault()
-    if (title.trim()) props.onConfirm(title.trim())
+    if (!props.busy && title.trim()) props.onConfirm(title.trim())
   }
-  return <ModalFrame title="重命名保存点" subtitle="修改后的名称会用于时间线显示，不会改动项目文件或代码。" onClose={props.onClose}>
+  return <ModalFrame title="重命名保存点" subtitle="修改后的名称会用于时间线显示，不会改动项目文件或代码。" onClose={props.onClose} busy={props.busy}>
     <form className="checkpoint-name-form" onSubmit={submit}>
-      <label>保存点名称<input aria-label="保存点名称" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} autoFocus /></label>
-      <div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose}>取消</button><button className="button primary" disabled={!title.trim() || props.busy}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Pencil size={16} />}保存名称</button></div>
+      <label>保存点名称<input aria-label="保存点名称" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} data-autofocus /></label>
+      <div className="modal-actions"><button type="button" className="button ghost" onClick={props.onClose} disabled={props.busy}>取消</button><button className="button primary" disabled={!title.trim() || props.busy}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Pencil size={16} />}保存名称</button></div>
     </form>
   </ModalFrame>
 }
 
 function DeleteCheckpointModal(props: { checkpoint: Checkpoint; busy: boolean; onClose(): void; onConfirm(): void }): ReactNode {
   const [confirmed, setConfirmed] = useState(false)
-  return <ModalFrame danger title="删除保存点" subtitle="请确认是否删除所选保存点。" onClose={props.onClose}>
-    <div className="checkpoint-delete-content"><div className="remove-project-warning"><Trash2 size={20} /><div><strong>此操作会移除这个本地保存点和它的 Git 记录。</strong><p>项目文件、代码和其他保存点不会被删除。为保证可恢复性，VibeGit 会保留最后一个保存点。</p></div></div><label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解，确认删除这个保存点</label><div className="modal-actions"><button className="button ghost" onClick={props.onClose}>取消</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}确认删除保存点</button></div></div>
+  return <ModalFrame danger title="删除保存点" subtitle="请确认是否删除所选保存点。" onClose={props.onClose} busy={props.busy}>
+    <div className="checkpoint-delete-content"><div className="remove-project-warning"><Trash2 size={20} /><div><strong>此操作会移除这个本地保存点和它的 Git 记录。</strong><p>项目文件、代码和其他保存点不会被删除。为保证可恢复性，VibeGit 会保留最后一个保存点。</p></div></div><label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解，确认删除这个保存点</label><div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={props.busy}>取消</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={16} /> : <Trash2 size={16} />}确认删除保存点</button></div></div>
   </ModalFrame>
 }
 
 function RemoveProjectModal(props: { project: Project; busy: boolean; onClose(): void; onConfirm(): void }): ReactNode {
   const [confirmed, setConfirmed] = useState(false)
-  return <ModalFrame danger title={`移除“${props.project.name}”的备份？`} subtitle="这会把该项目从 VibeGit 的项目列表中移除。" onClose={props.onClose}>
+  return <ModalFrame danger title={`移除“${props.project.name}”的备份？`} subtitle="这会把该项目从 VibeGit 的项目列表中移除。" onClose={props.onClose} busy={props.busy}>
     <div className="remove-project-warning"><ShieldAlert size={20} /><div><strong>将删除本地 VibeGit 保存点和操作记录</strong><p>不会删除你的项目文件、Git 仓库，也不会删除 GitHub 上已有的备份。</p></div></div>
     <label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我了解：这只会删除 VibeGit 的本地备份记录</label>
     <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={props.busy}>取消</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <Trash2 size={17} />}删除本地备份</button></div>
@@ -1081,7 +1224,7 @@ function ShelfModal(props: { project: Project; onClose(): void; onChanged(messag
 
   const create = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (!title.trim()) return
+    if (busy || !title.trim()) return
     setBusy('create')
     try {
       unwrap(await window.vibegit.createShelf(project.id, title.trim()))
@@ -1100,105 +1243,204 @@ function ShelfModal(props: { project: Project; onClose(): void; onChanged(messag
     finally { setBusy(undefined) }
   }
 
-  return <ModalFrame title="暂时收起修改" subtitle="把未完成的修改安全隐藏起来，之后可以完整取回；不会直接删除新增文件。" onClose={props.onClose}>
+  return <ModalFrame title="暂时收起修改" subtitle="把未完成的修改安全隐藏起来，之后可以完整取回；不会直接删除新增文件。" onClose={props.onClose} busy={Boolean(busy)}>
     <div className="shelf-content">
       <form className="shelf-create" onSubmit={(event) => void create(event)}><label>这组修改的名称<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} /></label><button className="button primary" disabled={!title.trim() || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <Archive size={16} />}安全收起当前修改</button></form>
       <div className="shelf-note"><ShieldCheck size={17} /><p>收起前会先创建保存点；取回时如果当前项目又有变化，也会先建立保险点。</p></div>
       <div className="shelf-list"><div className="section-title"><div><h3>已经收起的修改</h3><p>只有“等待取回”的记录可以操作。</p></div></div>{loading ? <LoadingView compact label="正在读取…" /> : shelves.filter((shelf) => shelf.status === 'active').length === 0 ? <div className="empty-shelves"><Archive size={22} /><span>还没有暂时收起的修改</span></div> : shelves.filter((shelf) => shelf.status === 'active').map((shelf) => <div className="shelf-row" key={shelf.id}><ArchiveRestore size={18} /><div><strong>{shelf.title}</strong><small>{formatRelativeTime(shelf.createdAt)}</small></div><button className="button secondary small" disabled={Boolean(busy)} onClick={() => void retrieve(shelf)}>{busy === shelf.id ? <LoaderCircle className="spin" size={14} /> : <ArchiveRestore size={14} />}取回修改</button></div>)}</div>
-      <div className="modal-actions"><button className="button ghost" onClick={props.onClose}>关闭</button></div>
+      <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={Boolean(busy)}>关闭</button></div>
     </div>
   </ModalFrame>
 }
 
 function RestoreModal(props: { preview: RestorePreview; checkpoint: Checkpoint; busy: boolean; onClose(): void; onConfirm(): void }): ReactNode {
   const [confirmed, setConfirmed] = useState(false)
-  return <ModalFrame danger title={`回到“${props.checkpoint.title}”`} subtitle="VibeGit 已先保存当前状态。请确认下面的影响后再继续。" onClose={props.onClose}>
+  return <ModalFrame danger title={`回到“${props.checkpoint.title}”`} subtitle="VibeGit 已先保存当前状态。请确认下面的影响后再继续。" onClose={props.onClose} busy={props.busy}>
     <div className="restore-overview"><div><FilePlus2 size={19} /><strong>{props.preview.addCount}</strong><span>将恢复</span></div><div><GitCompareArrows size={19} /><strong>{props.preview.overwriteCount}</strong><span>将覆盖</span></div><div><AlertTriangle size={19} /><strong>{props.preview.removeCount}</strong><span>将移出当前版本</span></div><div><ShieldAlert size={19} /><strong>{props.preview.conflictCount}</strong><span>将移入恢复区</span></div></div>
     <div className="impact-list">{props.preview.files.length === 0 ? <p>两个版本的文件内容相同。</p> : props.preview.files.slice(0, 80).map((file) => <div key={`${file.action}-${file.path}`}><span className={`impact-icon ${file.action}`}>{file.action === 'add' ? '+' : file.action === 'remove' ? '−' : file.action === 'move_to_recovery' ? '!' : '↻'}</span><span><strong>{file.path}</strong><small>{file.reason}</small></span></div>)}</div>
     <div className="insurance-note"><ShieldCheck size={20} /><div><strong>当前状态已经存入“回退前保险点”</strong><p>回退后可点击“撤销本次回退”，不会永久丢失现在的代码。</p></div></div>
     <label className="confirm-row"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已了解这些文件变化，确认回到这个版本</label>
-    <div className="modal-actions"><button className="button ghost" onClick={props.onClose}>暂不回退</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <RotateCcw size={17} />}确认并安全回退</button></div>
+    <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={props.busy}>暂不回退</button><button className="button danger" disabled={!confirmed || props.busy} onClick={props.onConfirm}>{props.busy ? <LoaderCircle className="spin" size={17} /> : <RotateCcw size={17} />}确认并安全回退</button></div>
   </ModalFrame>
 }
 
 function BackupModal(props: { project: Project; onClose(): void; onProjectChange(): Promise<void>; onSuccess(message: string): void; onError(value: unknown): void }): ReactNode {
-  const { project, onError } = props
+  const [updatedProject, setUpdatedProject] = useState<Project>()
+  const project = updatedProject ?? props.project
   const [status, setStatus] = useState<GitHubCliStatus>()
+  const [statusLoading, setStatusLoading] = useState(true)
+  const [statusError, setStatusError] = useState<PublicError>()
+  const statusRequest = useRef(0)
+  const [authorization, setAuthorization] = useState<GitHubAuthorizationState>()
+  const [authorizationReadFailed, setAuthorizationReadFailed] = useState(false)
+  const authorizationPending = useRef(false)
   const [scan, setScan] = useState<SensitiveScanResult>()
-  const [loading, setLoading] = useState(true)
+  const [scanLoading, setScanLoading] = useState(true)
+  const [scanError, setScanError] = useState<PublicError>()
   const [busy, setBusy] = useState<string>()
+  const operation = useRef<string | undefined>(undefined)
+  const [operationError, setOperationError] = useState<PublicError>()
+  const [refreshWarning, setRefreshWarning] = useState<string>()
+  const [pushComplete, setPushComplete] = useState(false)
   const [repoName, setRepoName] = useState(project.name.replace(/[^A-Za-z0-9._-]/g, '-') || 'vibegit-project')
   const [remoteUrl, setRemoteUrl] = useState('')
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
+  const refreshStatus = async (): Promise<void> => {
+    const request = ++statusRequest.current
+    setStatusLoading(true)
+    setStatusError(undefined)
     try {
-      const [nextStatus, nextScan] = await Promise.all([window.vibegit.githubStatus(), window.vibegit.githubScan(project.id)])
-      setStatus(unwrap(nextStatus)); setScan(unwrap(nextScan))
-    } catch (value) { onError(value) }
-    finally { setLoading(false) }
-  }, [project.id, onError])
+      const result = unwrap(await window.vibegit.githubStatus())
+      if (request === statusRequest.current) setStatus(result)
+    } catch (value) {
+      if (request === statusRequest.current) { setStatus(undefined); setStatusError(errorFrom(value)) }
+    } finally { if (request === statusRequest.current) setStatusLoading(false) }
+  }
+  const refreshScan = async (): Promise<void> => {
+    if (scanLoading || operation.current) return
+    setScanLoading(true)
+    setScanError(undefined)
+    setScan(undefined)
+    try { setScan(unwrap(await window.vibegit.githubScan(project.id))) }
+    catch (value) { setScanError(errorFrom(value)) }
+    finally { setScanLoading(false) }
+  }
   useEffect(() => {
     let active = true
-    void Promise.all([window.vibegit.githubStatus(), window.vibegit.githubScan(project.id)])
-      .then(([nextStatus, nextScan]) => {
-        if (!active) return
-        setStatus(unwrap(nextStatus))
-        setScan(unwrap(nextScan))
-      })
-      .catch((value: unknown) => { if (active) onError(value) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [project.id, onError])
+    const request = ++statusRequest.current
+    void window.vibegit.githubStatus()
+      .then((result) => { if (active && request === statusRequest.current) setStatus(unwrap(result)) })
+      .catch((value: unknown) => { if (active && request === statusRequest.current) setStatusError(errorFrom(value)) })
+      .finally(() => { if (active && request === statusRequest.current) setStatusLoading(false) })
+    void window.vibegit.githubScan(project.id)
+      .then((result) => { if (active) setScan(unwrap(result)) })
+      .catch((value: unknown) => { if (active) setScanError(errorFrom(value)) })
+      .finally(() => { if (active) setScanLoading(false) })
+    return () => { active = false; statusRequest.current += 1 }
+  }, [project.id])
+
+  useEffect(() => {
+    if (busy !== 'authorize') return
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        const result = unwrap(await window.vibegit.githubAuthorizationStatus())
+        if (!active || !authorizationPending.current) return
+        if (result.phase !== 'idle') setAuthorization(result)
+        setAuthorizationReadFailed(false)
+      } catch {
+        if (active && authorizationPending.current) setAuthorizationReadFailed(true)
+      }
+      if (active) timer = setTimeout(() => void poll(), 800)
+    }
+    void poll()
+    return () => { active = false; clearTimeout(timer) }
+  }, [busy])
+
+  const begin = (name: string): boolean => {
+    if (operation.current) return false
+    operation.current = name
+    setBusy(name)
+    setOperationError(undefined)
+    setRefreshWarning(undefined)
+    return true
+  }
+  const finish = (): void => { operation.current = undefined; setBusy(undefined) }
+  const refreshAfterSuccess = async (message: string): Promise<void> => {
+    props.onSuccess(message)
+    try { await props.onProjectChange() }
+    catch { setRefreshWarning(`${message}，但本地列表暂未刷新；操作已完成，无需重复提交。`) }
+  }
 
   const createPrivate = async (): Promise<void> => {
-    setBusy('create')
-    try { unwrap(await window.vibegit.githubCreatePrivate({ projectId: props.project.id, name: repoName })); await props.onProjectChange(); props.onSuccess('GitHub 私有仓库已创建并连接') }
-    catch (value) { props.onError(value) } finally { setBusy(undefined) }
+    if (!repoName.trim() || !status?.authenticated || !status.sshKeyReady || !begin('create')) return
+    try {
+      setUpdatedProject(unwrap(await window.vibegit.githubCreatePrivate({ projectId: project.id, name: repoName })))
+      await refreshAfterSuccess('GitHub 私有仓库已创建并连接')
+    } catch (value) { setOperationError(errorFrom(value)) } finally { finish() }
   }
   const connect = async (): Promise<void> => {
-    setBusy('connect')
-    try { unwrap(await window.vibegit.githubConnect({ projectId: props.project.id, remoteUrl })); await props.onProjectChange(); props.onSuccess('GitHub 备份位置已连接') }
-    catch (value) { props.onError(value) } finally { setBusy(undefined) }
+    if (!remoteUrl.trim() || !status?.authenticated || !status.sshKeyReady || !begin('connect')) return
+    try {
+      setUpdatedProject(unwrap(await window.vibegit.githubConnect({ projectId: project.id, remoteUrl })))
+      await refreshAfterSuccess('GitHub 备份位置已连接')
+    } catch (value) { setOperationError(errorFrom(value)) } finally { finish() }
   }
   const authorize = async (): Promise<void> => {
-    setBusy('authorize')
+    if (!begin('authorize')) return
+    authorizationPending.current = true
+    setAuthorization({ phase: 'authorizing', message: '' })
+    setAuthorizationReadFailed(false)
     try {
       const result = unwrap(await window.vibegit.githubAuthorize())
-      await refresh()
+      authorizationPending.current = false
+      setAuthorization({ phase: 'complete', message: '' })
+      await refreshStatus()
       props.onSuccess(result.message)
-    } catch (value) { props.onError(value) } finally { setBusy(undefined) }
+    } catch (value) {
+      authorizationPending.current = false
+      setAuthorization({ phase: 'failed', message: '' })
+      setStatus((current) => current ? { ...current, sshKeyReady: false } : current)
+      setOperationError(errorFrom(value))
+    } finally { finish() }
   }
   const push = async (): Promise<void> => {
-    setBusy('push')
+    if (pushComplete || !project.githubRemoteUrl || !status?.authenticated || !status.sshKeyReady || !scan || scan.blocked || scanLoading || !begin('push')) return
     try {
-      const currentScan = unwrap(await window.vibegit.githubScan(props.project.id)); setScan(currentScan)
-      if (currentScan.blocked) return
-      unwrap(await window.vibegit.githubPush(props.project.id)); await props.onProjectChange(); props.onSuccess('项目已安全备份到 GitHub'); props.onClose()
-    } catch (value) { props.onError(value) } finally { setBusy(undefined) }
+      // The service saves and scans the exact checkpoint before uploading it.
+      const result = unwrap(await window.vibegit.githubPush(project.id))
+      setPushComplete(true)
+      setUpdatedProject({ ...project, githubRemoteUrl: result.remoteUrl, githubSyncStatus: 'synced', lastSyncedAt: result.syncedAt })
+      await refreshAfterSuccess('项目已安全备份到 GitHub')
+    } catch (value) {
+      setUpdatedProject({ ...project, githubSyncStatus: 'failed' })
+      setOperationError(errorFrom(value))
+    } finally { finish() }
   }
   const ignore = async (item: SensitiveRisk): Promise<void> => {
-    setBusy(`ignore-${item.path}`)
-    try { setScan(unwrap(await window.vibegit.githubIgnoreRisk(props.project.id, item))) }
-    catch (value) { props.onError(value) } finally { setBusy(undefined) }
+    if (!begin(`ignore-${item.path}`)) return
+    setScanLoading(true)
+    setScanError(undefined)
+    setScan(undefined)
+    try { setScan(unwrap(await window.vibegit.githubIgnoreRisk(project.id, item))) }
+    catch (value) { setScanError(errorFrom(value)) }
+    finally { setScanLoading(false); finish() }
   }
 
-  return <ModalFrame wide title="GitHub 私有备份" subtitle="只会备份到你自己的 Private 仓库；每次上传前都会扫描风险。" onClose={props.onClose}>
-    {loading ? <LoadingView label="正在检查 GitHub 和项目安全状态…" compact /> : <div className="backup-content">
-      <div className={`connection-card ${status?.authenticated ? 'connected' : 'offline'}`}>
-        <span>{status?.authenticated ? <CheckCircle2 size={20} /> : <TerminalSquare size={20} />}</span>
+  const authorizationMessage = authorization?.phase === 'provisioning' ? '正在检查并关联 VibeGit 专用 SSH 密钥…'
+    : authorization?.phase === 'complete' ? 'GitHub 连接检查已完成'
+      : authorization?.phase === 'failed' ? 'GitHub 连接未完成，请重试'
+        : '请在 GitHub 授权页面完成确认，完成后会自动继续。'
+  const userCode = authorization?.phase === 'authorizing' && /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(authorization.userCode ?? '') ? authorization.userCode : undefined
+
+  return <ModalFrame wide title="GitHub 私有备份" subtitle="只会备份到你自己的 Private 仓库；每次上传前都会扫描风险。" onClose={props.onClose} busy={Boolean(busy)}>
+    <div className="backup-content">
+      <div className={`connection-card ${status?.authenticated && status.sshKeyReady ? 'connected' : 'offline'}`}>
+        <span>{statusLoading ? <LoaderCircle className="spin" size={20} /> : status?.authenticated && status.sshKeyReady ? <CheckCircle2 size={20} /> : <TerminalSquare size={20} />}</span>
         <div>
-          <strong>{status?.authenticated ? `GitHub 已连接${status.username ? ` · ${status.username}` : ''}` : status?.installed ? 'GitHub 尚未登录' : '尚未安装 GitHub CLI'}</strong>
-          <p>{status?.message}</p>
-          {status?.installed && !status?.sshKeyReady && <div className="connection-actions"><button className="button secondary small" disabled={Boolean(busy)} onClick={() => void authorize()}>{busy === 'authorize' ? <LoaderCircle className="spin" size={14} /> : <LockKeyhole size={14} />}{status.authenticated ? '创建并关联 SSH 密钥' : '连接 GitHub 并创建 SSH 密钥'}</button><small>会打开 GitHub 授权页面，并只向你的账户关联 VibeGit 专用公钥。</small></div>}
+          <strong>{statusLoading ? '正在检查 GitHub 连接…' : statusError ? 'GitHub 连接检查失败' : status?.authenticated ? `GitHub 已登录${status.username ? ` · ${status.username}` : ''}` : status?.installed ? 'GitHub 尚未登录' : '尚未安装 GitHub CLI'}</strong>
+          <p>{statusError ? statusError.message : status?.message}</p>
+          <div className="connection-actions">
+            {status?.installed && <button className="button secondary small" disabled={Boolean(busy) || statusLoading} onClick={() => void authorize()}>{busy === 'authorize' ? <LoaderCircle className="spin" size={14} /> : <LockKeyhole size={14} />}{status.authenticated ? '检查并修复 GitHub 连接' : '连接 GitHub 并创建 SSH 密钥'}</button>}
+            <button className="button ghost small" disabled={Boolean(busy) || statusLoading} onClick={() => void refreshStatus()}><RefreshCw size={14} />重新检查连接</button>
+            {status?.installed && <small>仅向你的账户关联 VibeGit 专用公钥。密钥被撤销或连接失效时，可在这里修复。</small>}
+          </div>
           {status?.sshKeyReady && <small className="connection-ready"><ShieldCheck size={14} />已使用 VibeGit 专用 SSH 密钥</small>}
-          {!status?.installed && <small>安装 GitHub CLI 后，即可在这里一键完成浏览器授权。</small>}
+          {!statusLoading && !statusError && !status?.installed && <small>请在“设置 → 配置环境”安装 GitHub CLI，然后重新检查连接。</small>}
+          {authorization && <div className="connection-actions authorization-progress" role="status" aria-live="polite"><strong>{authorizationMessage}</strong>{authorization.phase === 'authorizing' && <><a className="button secondary small authorization-link" href="https://github.com/login/device" target="_blank" rel="noreferrer">打开 GitHub 授权页面</a>{userCode ? <div><small>在 GitHub 输入一次性授权码：</small><code className="authorization-code" aria-label="GitHub 一次性授权码">{userCode}</code></div> : <small>正在等待一次性授权码…</small>}</>}{authorizationReadFailed && busy === 'authorize' && <small>暂时无法读取授权进度，授权仍在进行，请保留此窗口。</small>}</div>}
         </div>
       </div>
-      {!props.project.githubRemoteUrl ? <div className="backup-setup-grid"><form onSubmit={(event) => { event.preventDefault(); void createPrivate() }}><span className="pill safe">推荐</span><h3>创建新的私有仓库</h3><p>显式创建为 Private，不会公开你的源代码。</p><label>仓库名称<input value={repoName} onChange={(event) => setRepoName(event.target.value)} /></label><button className="button primary" disabled={!status?.authenticated || !status?.sshKeyReady || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />}创建并连接</button></form><form onSubmit={(event) => { event.preventDefault(); void connect() }}><span className="pill neutral">已有仓库</span><h3>连接现有私有仓库</h3><p>登录后会验证仓库确实是 Private，再设置备份位置。</p><label>GitHub 备份位置<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://github.com/you/project.git" /></label><button className="button secondary" disabled={!status?.authenticated || !status?.sshKeyReady || !remoteUrl.trim() || Boolean(busy)}>验证并连接</button></form></div> : <div className="remote-card"><Cloud size={20} /><div><strong>备份位置已设置</strong><p>{props.project.githubRemoteUrl}</p></div><span className={`pill ${props.project.githubSyncStatus === 'synced' ? 'safe' : 'warning'}`}>{props.project.githubSyncStatus === 'synced' ? '已同步' : '等待同步'}</span></div>}
-      <div className="scan-section"><div className="section-title"><div><h3>上传前安全检查</h3><p>检查环境变量、私钥、访问令牌、数据库、大文件和生成目录。</p></div><button className="button ghost" onClick={() => void refresh()}><RefreshCw size={15} />重新扫描</button></div>{scan?.blocked ? <div className="risk-list"><div className="risk-heading"><ShieldAlert size={19} /><strong>发现 {scan.risks.length} 项风险，已阻止上传</strong></div>{scan.risks.map((item) => <div className="risk-item" key={`${item.kind}-${item.path}`}><AlertTriangle size={17} /><div><strong>{item.path}</strong><p>{item.message}</p></div>{item.ignoreSuggestion && <button className="button small" disabled={Boolean(busy)} onClick={() => void ignore(item)}>{busy === `ignore-${item.path}` ? <LoaderCircle className="spin" size={14} /> : null}加入忽略列表</button>}</div>)}</div> : <div className="scan-safe"><ShieldCheck size={20} /><span><strong>未发现阻止备份的风险</strong><small>已检查 {scan?.scannedFiles ?? 0} 个文件</small></span></div>}</div>
-      <div className="modal-actions"><button className="button ghost" onClick={props.onClose}>关闭</button><button className="button primary" disabled={!props.project.githubRemoteUrl || !status?.authenticated || scan?.blocked || Boolean(busy)} onClick={() => void push()}>{busy === 'push' ? <LoaderCircle className="spin" size={17} /> : <Cloud size={17} />}安全备份到 GitHub</button></div>
-    </div>}
+      {!project.githubRemoteUrl ? <div className="backup-setup-grid"><form onSubmit={(event) => { event.preventDefault(); void createPrivate() }}><span className="pill safe">推荐</span><h3>创建新的私有仓库</h3><p>显式创建为 Private，不会公开你的源代码。</p><label>仓库名称<input value={repoName} onChange={(event) => setRepoName(event.target.value)} disabled={Boolean(busy)} /></label><button className="button primary" disabled={statusLoading || !status?.authenticated || !status?.sshKeyReady || !repoName.trim() || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <LockKeyhole size={16} />}创建并连接</button></form><form onSubmit={(event) => { event.preventDefault(); void connect() }}><span className="pill neutral">已有仓库</span><h3>连接现有私有仓库</h3><p>支持 HTTPS 或 SSH 地址；验证为 Private 后，使用 VibeGit 专用密钥备份。</p><label>GitHub 备份位置<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} placeholder="https://github.com/you/project.git" disabled={Boolean(busy)} /></label><button className="button secondary" disabled={statusLoading || !status?.authenticated || !status?.sshKeyReady || !remoteUrl.trim() || Boolean(busy)}>验证并连接</button></form></div> : <div className="remote-card"><Cloud size={20} /><div><strong>备份位置已设置</strong><p>{project.githubRemoteUrl}</p></div><span className={`pill ${project.githubSyncStatus === 'synced' ? 'safe' : 'warning'}`}>{project.githubSyncStatus === 'failed' ? '上次备份失败' : project.githubSyncStatus === 'synced' ? '上次备份成功' : '等待同步'}</span></div>}
+      <div className="scan-section"><div className="section-title"><div><h3>上传前安全检查</h3><p>检查环境变量、私钥、访问令牌、数据库、大文件和生成目录。</p></div><button className="button ghost" disabled={Boolean(busy) || scanLoading} onClick={() => void refreshScan()}><RefreshCw size={15} />重新扫描</button></div>
+        {scanLoading ? <LoadingView label="正在扫描项目文件，连接 GitHub 无需等待扫描完成…" compact /> : scanError ? <div className="empty-diff" role="alert"><ShieldAlert size={26} /><strong>备份安全检查未完成</strong><span>{scanError.message}</span>{scanError.remediation && <span>{scanError.remediation}</span>}<button className="button secondary" disabled={Boolean(busy)} onClick={() => void refreshScan()}>重新检查</button></div> : scan?.blocked ? <div className="risk-list"><div className="risk-heading"><ShieldAlert size={19} /><strong>发现 {scan.risks.length} 项风险，已阻止上传</strong></div>{scan.risks.map((item) => <div className="risk-item" key={`${item.kind}-${item.path}`}><AlertTriangle size={17} /><div><strong>{item.path}</strong><p>{item.message}</p></div>{item.ignoreSuggestion && <button className="button small" disabled={Boolean(busy)} onClick={() => void ignore(item)}>{busy === `ignore-${item.path}` ? <LoaderCircle className="spin" size={14} /> : null}加入忽略列表</button>}</div>)}</div> : scan ? <div className="scan-safe"><ShieldCheck size={20} /><span><strong>未发现阻止备份的风险</strong><small>已检查 {scan.scannedFiles} 个文件；上传时会再次核验保存点。</small></span></div> : <p>尚未完成安全检查</p>}
+      </div>
+      {operationError && <div className="preferences-notice error" role="alert"><strong>{operationError.message}</strong>{operationError.remediation && <p>{operationError.remediation}</p>}</div>}
+      {busy === 'push' && <p className="preferences-notice" role="status">正在保存保护点、核验风险并上传，请保留此窗口…</p>}
+      {pushComplete && <p className="preferences-notice" role="status">本次备份已完成，已同步到 GitHub。</p>}
+      {refreshWarning && <p className="preferences-notice" role="status">{refreshWarning}</p>}
+      <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={Boolean(busy)}>关闭</button><button className="button primary" disabled={pushComplete || statusLoading || !project.githubRemoteUrl || !status?.authenticated || !status?.sshKeyReady || !scan || scan.blocked || scanLoading || Boolean(busy)} onClick={() => void push()}>{busy === 'push' ? <LoaderCircle className="spin" size={17} /> : <Cloud size={17} />}{pushComplete ? '本次备份已完成' : '安全备份到 GitHub'}</button></div>
+    </div>
   </ModalFrame>
 }
 
@@ -1247,12 +1489,20 @@ function DataDirectoryPreferences(): ReactNode {
   const [settings, setSettings] = useState<AppSettings>()
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
+  const [error, setError] = useState<string>()
 
-  useEffect(() => { void window.vibegit.getSettings().then((result) => setSettings(unwrap(result))) }, [])
+  useEffect(() => {
+    let active = true
+    void window.vibegit.getSettings()
+      .then((result) => { if (active) setSettings(unwrap(result)) })
+      .catch((value: unknown) => { if (active) setError(errorFrom(value).message) })
+    return () => { active = false }
+  }, [])
 
   const chooseDirectory = async (): Promise<void> => {
     setBusy(true)
     setNotice(undefined)
+    setError(undefined)
     try {
       const path = unwrap(await window.vibegit.selectDataDirectory())
       if (!path) return
@@ -1260,13 +1510,13 @@ function DataDirectoryPreferences(): ReactNode {
       setSettings((current) => current ? { ...current, dataDirectory: update.dataDirectory } : current)
       setNotice(update.restartRequired ? '已保存新的记录位置。重启 VibeGit 后会使用该位置，现有记录不会被删除。' : '记录位置未变更。')
     } catch (value) {
-      setNotice(errorFrom(value).message)
+      setError(errorFrom(value).message)
     } finally {
       setBusy(false)
     }
   }
 
-  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><HardDrive size={19} /><div><h2>本地记录位置</h2><p>选择保存保护记录、诊断日志和 VibeGit 专用 SSH 数据的本地文件夹。</p></div></div><div className="preferences-action"><code title={settings?.dataDirectory}>{settings?.dataDirectory ?? '读取中…'}</code><button className="button secondary small" disabled={busy} onClick={() => void chooseDirectory()}>{busy ? <LoaderCircle className="spin" size={14} /> : <FolderOpen size={14} />}选择文件夹</button></div>{notice && <p className="preferences-notice">{notice}</p>}</div></section>
+  return <section className="page preferences-page"><div className="settings-card preferences-card"><div className="settings-card-title"><HardDrive size={19} /><div><h2>本地记录位置</h2><p>选择保存保护记录、诊断日志和 VibeGit 专用 SSH 数据的本地文件夹。</p></div></div><div className="preferences-action"><code title={settings?.dataDirectory}>{settings?.dataDirectory ?? (error ? '读取失败' : '读取中…')}</code><button className="button secondary small" disabled={busy} onClick={() => void chooseDirectory()}>{busy ? <LoaderCircle className="spin" size={14} /> : <FolderOpen size={14} />}选择文件夹</button></div>{notice && <p className="preferences-notice" role="status">{notice}</p>}{error && <p className="preferences-notice error" role="alert">{error}</p>}</div></section>
 }
 
 function EnvironmentPreferences(): ReactNode {
@@ -1330,8 +1580,53 @@ function AgentRow({ name, status }: { name: string; status?: AgentConnectionStat
   return <div className="agent-row"><span className={`agent-icon ${status?.installed ? 'online' : ''}`}><Code2 size={17} /></span><div><strong>{name}</strong><small>{status?.detail ?? '正在检测…'}</small></div><span className={`pill ${status?.installed ? 'safe' : 'neutral'}`}>{status?.installed ? '已检测' : '未连接'}</span></div>
 }
 
-function ModalFrame({ title, subtitle, onClose, danger, wide, children }: { title: string; subtitle: string; onClose(): void; danger?: boolean; wide?: boolean; children: ReactNode }): ReactNode {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className={`modal ${danger ? 'modal-danger' : ''} ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}><header><div className={danger ? 'danger-symbol' : 'modal-symbol'}>{danger ? <ShieldAlert size={22} /> : <ShieldCheck size={22} />}</div><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" aria-label="关闭" onClick={onClose}><X size={18} /></button></header>{children}</section></div>
+function useDialogFocus(onClose: () => void, busy: boolean) {
+  const dialogRef = useRef<HTMLElement | null>(null)
+  const controls = useRef({ onClose, busy })
+  useEffect(() => { controls.current = { onClose, busy } }, [onClose, busy])
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : undefined
+    const isTopDialog = (): boolean => Array.from(document.querySelectorAll('[aria-modal="true"]')).at(-1) === dialog
+    const focusable = (): HTMLElement[] => Array.from(dialog.querySelectorAll<HTMLElement>('*')).filter((element) => element.tabIndex >= 0 && !element.matches(':disabled, [type="hidden"]') && !element.hidden && element.getAttribute('aria-hidden') !== 'true')
+    const focusFirst = (): void => { (dialog.querySelector<HTMLElement>('[data-autofocus]') ?? focusable()[0] ?? dialog).focus() }
+    if (isTopDialog()) focusFirst()
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (!isTopDialog()) return
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        if (!controls.current.busy) controls.current.onClose()
+      } else if (event.key === 'Tab') {
+        const elements = focusable()
+        const first = elements[0]
+        const last = elements.at(-1)
+        if (!first || !last) { event.preventDefault(); dialog.focus(); return }
+        if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) {
+          event.preventDefault(); last.focus()
+        } else if (!event.shiftKey && (document.activeElement === last || !dialog.contains(document.activeElement))) {
+          event.preventDefault(); first.focus()
+        }
+      }
+    }
+    const onFocus = (event: FocusEvent): void => {
+      if (isTopDialog() && event.target instanceof Node && !dialog.contains(event.target)) focusFirst()
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    document.addEventListener('focusin', onFocus)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true)
+      document.removeEventListener('focusin', onFocus)
+      if (previousFocus?.isConnected) previousFocus.focus()
+    }
+  }, [])
+  return dialogRef
+}
+
+function ModalFrame({ title, subtitle, onClose, danger, wide, busy = false, children }: { title: string; subtitle: string; onClose(): void; danger?: boolean; wide?: boolean; busy?: boolean; children: ReactNode }): ReactNode {
+  const dialogRef = useDialogFocus(onClose, busy)
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose() }}><section ref={dialogRef} className={`modal ${danger ? 'modal-danger' : ''} ${wide ? 'modal-wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} aria-busy={busy} tabIndex={-1}><header><div className={danger ? 'danger-symbol' : 'modal-symbol'}>{danger ? <ShieldAlert size={22} /> : <ShieldCheck size={22} />}</div><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" aria-label="关闭" disabled={busy} onClick={onClose}><X size={18} /></button></header>{children}</section></div>
 }
 
 function ErrorBanner({ error, onClose }: { error: PublicError; onClose(): void }): ReactNode {

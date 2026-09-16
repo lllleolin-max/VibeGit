@@ -169,6 +169,7 @@ export class GitCommandRunner {
     return await new Promise<CommandResult>((resolvePromise, reject) => {
       let settled = false
       let terminationError: VibeGitError | undefined
+      let terminationTimer: ReturnType<typeof setTimeout> | undefined
       let stdoutBytes = 0
       let stderrBytes = 0
       const stdoutChunks: Buffer[] = []
@@ -192,39 +193,87 @@ export class GitCommandRunner {
         return
       }
 
+      const terminate = (error: VibeGitError): void => {
+        if (settled || terminationError) return
+        terminationError = error
+        clearTimeout(timer)
+        // Even a failed OS cleanup or an inherited pipe must not leave the UI
+        // awaiting this command forever. Keep the original structured failure.
+        terminationTimer = setTimeout(() => {
+          if (settled) return
+          settled = true
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
+          child.stdin.destroy()
+          child.stdout.destroy()
+          child.stderr.destroy()
+          child.unref()
+          reject(new VibeGitError(error.code, 'Git 操作已停止等待，但无法确认子进程已全部退出', {
+            ...(error.detail ? { detail: error.detail } : {}),
+            remediation: '请先关闭这个项目关联的 Git 操作后重试。项目文件仍在原处。',
+            retryable: true,
+            cause: error
+          }))
+        }, 5000)
+        // A wrapper may already have exited while a descendant holds its pipe.
+        // Never pass the now-reusable wrapper PID to taskkill in that state.
+        if (child.exitCode !== null || child.signalCode !== null) return
+        if (process.platform === 'win32' && child.pid) {
+          // Git for Windows can launch a second git.exe that inherits the pipes.
+          // Kill the tree before its parent, otherwise close never arrives and
+          // the orphan may continue writing to the temporary checkpoint index.
+          const fallback = (): void => {
+            if (child.exitCode === null && child.signalCode === null) child.kill()
+          }
+          try {
+            const killer = spawn(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), [
+              '/PID', String(child.pid), '/T', '/F'
+            ], { windowsHide: true, shell: false, stdio: 'ignore', timeout: 4000 })
+            killer.once('error', fallback)
+            killer.once('close', (code) => { if (code !== 0) fallback() })
+          } catch {
+            fallback()
+          }
+        } else {
+          child.kill('SIGKILL')
+        }
+      }
+
       const timer = setTimeout(() => {
-        if (settled) return
-        terminationError = new VibeGitError('GIT_COMMAND_TIMEOUT', 'Git 操作超时，已安全停止', {
+        terminate(new VibeGitError('GIT_COMMAND_TIMEOUT', 'Git 操作超时，已安全停止', {
           detail: `${safeArgs(args).join(' ')} (${timeoutMs}ms)`,
           remediation: '项目文件仍在原处。检查磁盘、杀毒软件或仓库大小后重试。',
           retryable: true
-        })
-        child.kill()
+        }))
       }, timeoutMs)
 
       const failForSize = (): void => {
         if (settled || stdoutBytes + stderrBytes <= maxOutputBytes) return
-        terminationError = new VibeGitError('GIT_OUTPUT_TOO_LARGE', 'Git 返回的数据过大，已安全停止', {
+        terminate(new VibeGitError('GIT_OUTPUT_TOO_LARGE', 'Git 返回的数据过大，已安全停止', {
           remediation: '缩小查看范围或排除大型生成文件后重试。'
-        })
-        clearTimeout(timer)
-        child.kill()
+        }))
       }
 
       child.stdout.on('data', (chunk: Buffer) => {
+        if (terminationError) return
         stdoutBytes += chunk.length
-        stdoutChunks.push(chunk)
+        if (stdoutBytes + stderrBytes <= maxOutputBytes) stdoutChunks.push(chunk)
         failForSize()
       })
       child.stderr.on('data', (chunk: Buffer) => {
+        if (terminationError) return
         stderrBytes += chunk.length
-        stderrChunks.push(chunk)
+        if (stdoutBytes + stderrBytes <= maxOutputBytes) stderrChunks.push(chunk)
         failForSize()
       })
       child.on('error', (error) => {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        clearTimeout(terminationTimer)
+        if (terminationError) {
+          reject(terminationError)
+          return
+        }
         reject(new VibeGitError('GIT_NOT_AVAILABLE', '没有找到可用的 Git', {
           detail: error.message,
           remediation: '请安装 Git，或在设置中选择 Git 可执行文件。',
@@ -235,6 +284,7 @@ export class GitCommandRunner {
         if (settled) return
         settled = true
         clearTimeout(timer)
+        clearTimeout(terminationTimer)
         if (terminationError) {
           reject(terminationError)
           return
@@ -637,9 +687,10 @@ export class GitEngine {
     for (const changed of summary) {
       let patch = ''
       if (!changed.binary) {
+        const paths = changed.previousPath ? [changed.previousPath, changed.path] : [changed.path]
         const patchResult = await this.runner.run(
           projectPath,
-          ['-c', 'core.quotepath=false', 'diff', '--no-ext-diff', '--no-color', '--unified=3', from, toObjectId, '--', changed.path],
+          ['--literal-pathspecs', '-c', 'core.quotepath=false', 'diff', '--no-ext-diff', '--no-color', '-M', '--unified=3', from, toObjectId, '--', ...paths],
           { maxOutputBytes: 4 * 1024 * 1024 }
         )
         patch = patchResult.stdout.length > 1_000_000
