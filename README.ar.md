@@ -93,7 +93,9 @@ VibeGit هو خزنة إصدارات محلية لمشروعك. احفظ الم�
 ثبّت Node.js 24+ وpnpm 9+ وGit 2.23+، ثم شغّل الأوامر من جذر المستودع:
 
 ```powershell
-pnpm install
+git clone https://github.com/lllleolin-max/VibeGit.git
+cd VibeGit
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -113,7 +115,7 @@ pnpm dev
 
 ## حالة الإصدار
 
-**الإصدار المستقر الحالي: [v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · مثبّت Windows x64 ومصدر قابل للتشغيل**
+**الإصدار المستقر الحالي: [v1.0.1](https://github.com/lllleolin-max/VibeGit/releases/tag/v1.0.1) · مثبّت Windows x64 ومصدر قابل للتشغيل**
 
 تم تنفيذ والتحقق من حماية الإصدارات المحلية ونقاط الحفظ والخط الزمني وDiff والاستعادة مع المعاينة والتراجع والحفظ المؤقت ونسخ GitHub الخاص وواجهة Electron وAgent Events CLI الموحّد. يمكن لـ Codex وClaude Code نشر المصدر بالتعليمات أعلاه؛ أما مثبّتات Agent الأصلية فهي الخطوة التالية. توجد قوالب Hook وحدود التحقق موثقة. راجع [سجل التحقق النهائي](docs/FINAL_VALIDATION.md).
 

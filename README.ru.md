@@ -91,7 +91,9 @@ Skill будет развёрнут только для установленны
 Установите Node.js 24+, pnpm 9+ и Git 2.23+, затем выполните в корне репозитория:
 
 ```powershell
-pnpm install
+git clone https://github.com/lllleolin-max/VibeGit.git
+cd VibeGit
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -111,7 +113,7 @@ pnpm dev
 
 ## Статус релиза
 
-**Текущая стабильная версия: [v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · установщик Windows x64 и запускаемый исходный код**
+**Текущая стабильная версия: [v1.0.1](https://github.com/lllleolin-max/VibeGit/releases/tag/v1.0.1) · установщик Windows x64 и запускаемый исходный код**
 
 Реализованы и проверены: локальная защита версий, точки сохранения и таймлайн, Diff, восстановление с предпросмотром и отменой, временное сохранение, Private-бэкап GitHub, Electron UI и единый Agent Events CLI. Codex/Claude Code уже могут развернуть исходный код по инструкции выше; нативные установщики Agent — следующий этап. Шаблоны Hook и границы проверки задокументированы. См. [итоговую проверку](docs/FINAL_VALIDATION.md).
 

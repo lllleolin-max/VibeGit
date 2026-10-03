@@ -25,6 +25,10 @@
 
 **语言 / Languages：** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
 
+**第一次使用：** [下载 Windows x64 安装包](https://github.com/lllleolin-max/VibeGit/releases/latest) → 添加项目文件夹 → 开启版本保护 → 创建并确认第一个保存点。下一次让 AI 修改前，先确认保存点已生成。安装包无需 Node.js 或 pnpm；Git 2.23+ 仍是本地版本操作的依赖，GitHub 云备份另需 GitHub CLI 和账号授权。
+
+适合需要可查看、可恢复版本记录的个人开发者。它不是整盘备份，也不能保证恢复从未保存的文件；安装可选 Skill 不等于已经创建保存点。
+
 ---
 
 AI 不只会写代码，也会执行操作：清空文件、覆盖当前成果、回退到错误版本，甚至把一个已经跑通的项目变回几个小时前的状态。真正让人害怕的，不是改错一行代码，而是一次操作之后，整个项目突然“不见了”。
@@ -104,7 +108,9 @@ VibeGit 使用专用的 `vibegit` remote，不会覆盖、替换或改写你已�
 准备好 Node.js 24+、pnpm 9+ 和 Git 2.23+ 后，在仓库根目录运行：
 
 ```powershell
-pnpm install
+git clone https://github.com/lllleolin-max/VibeGit.git
+cd VibeGit
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -126,7 +132,7 @@ VibeGit 的默认立场是：**先保护，再操作。**
 
 ## 当前发布状态
 
-**当前稳定版本：[v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 安装包与可运行源码**
+**当前稳定版本：[v1.0.1](https://github.com/lllleolin-max/VibeGit/releases/tag/v1.0.1) · Windows x64 安装包与可运行源码**
 
 已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
 
@@ -137,6 +143,10 @@ Codex 与 Claude Code 目前可通过复制指令完成源码部署；原生自�
 如果 VibeGit 对你有帮助，欢迎在 [GitHub 上给我们一个 Star](https://github.com/lllleolin-max/VibeGit)。也非常期待你通过 [Issues](https://github.com/lllleolin-max/VibeGit/issues) 提出宝贵建议、使用体验或功能需求。
 
 ## 面向开发与贡献
+
+源码开发以 `package.json` 的运行时要求和 `packageManager`、提交的锁文件为准。GitHub 备份的配置问题见 [GitHub 设置说明](docs/GITHUB_SETUP.md)；首次尝试恢复建议使用一个练习项目，先查看影响预览再确认。
+
+仓库当前未提供项目级 LICENSE 文件。第三方依赖遵循各自许可；需要再分发或将本项目用于其他产品时，请先与维护者确认授权。
 
 构建 Windows 安装程序：
 

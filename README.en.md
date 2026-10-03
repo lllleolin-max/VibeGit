@@ -25,6 +25,10 @@
 
 **Languages:** [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md) · [العربية](README.ar.md)
 
+**First session:** [download the Windows x64 installer](https://github.com/lllleolin-max/VibeGit/releases/latest), add a project, enable version protection, and confirm your first checkpoint before asking an AI agent to edit it. The installer does not require Node.js or pnpm; local version operations still require Git 2.23+. GitHub backup also requires the GitHub CLI and account authorization.
+
+Designed for individual developers who need inspectable, recoverable project versions. This is not a whole-disk backup and cannot guarantee recovery of files that were never saved. Installing the optional Skill does not create a checkpoint by itself.
+
 ---
 
 AI does not only write code; it also takes actions. It can clear files, overwrite working results, or roll a project back to the wrong version—turning a working project into what it was hours ago. The frightening part is not one wrong line of code; it is opening the project after one action and finding that it is suddenly gone.
@@ -102,7 +106,9 @@ Deploy the VibeGit Skill for me. VibeGit was installed through the Windows insta
 Install Node.js 24+, pnpm 9+, and Git 2.23+, then run from the repository root:
 
 ```powershell
-pnpm install
+git clone https://github.com/lllleolin-max/VibeGit.git
+cd VibeGit
+pnpm install --frozen-lockfile
 pnpm dev
 ```
 
@@ -124,7 +130,7 @@ Read the [security design](docs/SECURITY.md) and [architecture](docs/ARCHITECTUR
 
 ## Release status
 
-**Current stable release: [v1.0](https://github.com/lllleolin-max/VibeGit/releases/latest) · Windows x64 installer and runnable source**
+**Current stable release: [v1.0.1](https://github.com/lllleolin-max/VibeGit/releases/tag/v1.0.1) · Windows x64 installer and runnable source**
 
 The verified core workflow includes local version protection, checkpoints and timeline, diffs, previewed restore and undo, shelving, private GitHub backup, the Electron desktop UI, and the unified Agent Events CLI.
 
