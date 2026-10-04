@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { access, lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { access, lstat, mkdir, mkdtemp, open, realpath, rm, utimes, writeFile } from 'node:fs/promises'
 import { constants as fsConstants } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve, sep } from 'node:path'
@@ -170,6 +170,7 @@ export class GitCommandRunner {
       let settled = false
       let terminationError: VibeGitError | undefined
       let terminationTimer: ReturnType<typeof setTimeout> | undefined
+      let inputError: Error | undefined
       let stdoutBytes = 0
       let stderrBytes = 0
       const stdoutChunks: Buffer[] = []
@@ -318,9 +319,20 @@ export class GitCommandRunner {
           }))
           return
         }
+        if (inputError) {
+          reject(new VibeGitError('GIT_COMMAND_INPUT_FAILED', 'Git 未能完整接收操作内容', {
+            remediation: '项目文件仍在原处。请检查 Git 状态后重试。',
+            retryable: true,
+            cause: inputError
+          }))
+          return
+        }
         resolvePromise(result)
       })
 
+      // A command can exit before consuming stdin (for example an index lock
+      // failure). EPIPE must reject this operation, never crash the whole app.
+      child.stdin.on('error', (error) => { inputError = error })
       if (options.stdin !== undefined) child.stdin.end(options.stdin)
       else child.stdin.end()
     })
@@ -583,24 +595,56 @@ export class GitEngine {
 
   async captureWorktreeTree(projectPath: string): Promise<CapturedTree> {
     await this.assertRepositoryRoot(projectPath)
-    if (!(await this.isRepository(projectPath))) {
-      throw new VibeGitError('NOT_A_GIT_PROJECT', '此项目尚未开启版本保护', {
-        remediation: '先点击“开启版本保护”。'
-      })
-    }
     const temporary = await mkdtemp(join(tmpdir(), 'vibegit-index-'))
     const indexPath = join(temporary, 'index')
-    const env = { GIT_INDEX_FILE: indexPath }
+    const env = {
+      GIT_INDEX_FILE: indexPath,
+      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_KEY_0: 'core.fsmonitor', GIT_CONFIG_VALUE_0: 'false',
+      GIT_CONFIG_KEY_1: 'core.splitIndex', GIT_CONFIG_VALUE_1: 'false',
+      GIT_CONFIG_KEY_2: 'core.sparseCheckout', GIT_CONFIG_VALUE_2: 'false',
+      GIT_CONFIG_KEY_3: 'index.sparse', GIT_CONFIG_VALUE_3: 'false'
+    }
     try {
       const head = await this.runner.run(projectPath, ['rev-parse', '--verify', 'HEAD'], { allowExitCodes: [0, 128] })
       const hasHead = head.exitCode === 0
-      // Seed from the user's real index tree rather than HEAD. A newly staged
-      // file therefore remains known as tracked even if it was later added to
-      // .gitignore; add -A captures its current worktree bytes without touching
-      // the real index.
-      const realIndexTree = (await this.runner.run(projectPath, ['write-tree'])).stdout.trim()
-      if (!realIndexTree) throw new VibeGitError('CHECKPOINT_INDEX_TREE_FAILED', '无法读取当前暂存状态')
-      await this.runner.run(projectPath, ['read-tree', realIndexTree], { env })
+      const realIndexPath = (await this.runner.run(projectPath, ['rev-parse', '--git-path', 'index'])).stdout.trim()
+      let sourceIndex
+      try {
+        sourceIndex = await open(resolve(projectPath, realIndexPath), 'r')
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      if (sourceIndex) {
+        try {
+          const stat = await sourceIndex.stat()
+          if (!stat.isFile()) throw new VibeGitError('CHECKPOINT_INDEX_TREE_FAILED', '当前暂存索引不是普通文件')
+          // Preserve stat-cache entries rather than reconstructing them through
+          // read-tree, which forced every tracked file to be hashed on each
+          // scan. An open handle pins Git's atomically replaced index version.
+          await writeFile(indexPath, await sourceIndex.readFile())
+          // Advancing the copied index timestamp can hide same-timestamp edits
+          // from Git's racy-index detection. Preserve a conservative timestamp.
+          await utimes(indexPath, stat.atime, stat.mtime)
+        } finally {
+          await sourceIndex.close()
+        }
+        // All writes, including cache-tree refresh and split-index expansion,
+        // happen on the copy. Git resolves immutable sharedindex files in its
+        // original Git directory and rejects missing/corrupt inputs safely.
+        await this.runner.run(projectPath, ['update-index', '--no-split-index', '--no-fsmonitor'], { env })
+        await this.runner.run(projectPath, ['write-tree'], { env }) // Reject unresolved conflicts before add can stage them.
+        const tracked = (await this.runner.run(projectPath, ['ls-files', '-v', '-z'], { env })).stdout.split('\0').filter(Boolean)
+        const assumed = tracked.filter((entry) => /^[a-z]/.test(entry)).map((entry) => entry.slice(2))
+        const skipped = tracked.filter((entry) => entry[0]?.toUpperCase() === 'S').map((entry) => entry.slice(2))
+        for (const [flag, paths] of [['--no-assume-unchanged', assumed], ['--no-skip-worktree', skipped]] as const) {
+          if (paths.length > 0) await this.runner.run(projectPath, ['update-index', flag, '-z', '--stdin'], {
+            env, stdin: `${paths.join('\0')}\0`
+          })
+        }
+      } else {
+        await this.runner.run(projectPath, ['read-tree', '--empty'], { env })
+      }
       await this.runner.run(projectPath, ['add', '-A', '--', '.'], { env, timeoutMs: 60_000 })
       const treeObjectId = (await this.runner.run(projectPath, ['write-tree'], { env })).stdout.trim()
       if (!treeObjectId) throw new VibeGitError('CHECKPOINT_TREE_FAILED', '无法读取当前项目状态')

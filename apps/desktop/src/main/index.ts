@@ -1,6 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
 import { appendFile, mkdir } from 'node:fs/promises'
-import { spawn } from 'node:child_process'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { defaultDataDirectory, saveDataDirectoryPreference, VibeGitService } from '@vibegit/core'
@@ -13,28 +12,23 @@ import {
   type ConnectRemoteInput,
   type CreateCheckpointInput,
   type CreatePrivateRepositoryInput,
-  type SensitiveRisk
+  type EnvironmentCheckResult,
+  type SensitiveRisk,
+  type VibeGitApi
 } from '@vibegit/shared'
 
-let service: VibeGitService | undefined
+import { validateApiArguments } from '../api-validation'
+import { ServiceLifecycle } from './service-lifecycle'
+import { InstallationRunner } from './installation-runner'
+
+const services = new ServiceLifecycle<VibeGitService>()
+const installation = new InstallationRunner()
 let mainWindow: BrowserWindow | undefined
 let diagnosticsPath = ''
 
-async function runHidden(executable: string, args: string[]): Promise<{ code: number; output: string }> {
-  return await new Promise((resolveResult, reject) => {
-    const child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-    let output = ''
-    const append = (chunk: Buffer): void => { output = `${output}${chunk.toString('utf8')}`.slice(-4_000) }
-    child.stdout.on('data', append)
-    child.stderr.on('data', append)
-    child.once('error', reject)
-    child.once('close', (code) => resolveResult({ code: code ?? -1, output }))
-  })
-}
-
 async function installGitHubCli(): Promise<void> {
   if (process.platform !== 'win32') throw new Error('Automatic GitHub CLI installation is currently available on Windows only')
-  const result = await runHidden('winget.exe', [
+  const result = await installation.run('winget.exe', [
     'install', '--id', 'GitHub.cli', '--exact', '--silent',
     '--accept-package-agreements', '--accept-source-agreements'
   ])
@@ -95,13 +89,15 @@ async function diagnostic(event: string, detail: Record<string, unknown> = {}): 
 }
 
 function registerHandler<TArgs extends unknown[], TResult>(
-  channel: string,
-  operation: (...args: TArgs) => Promise<TResult> | TResult
+  method: keyof VibeGitApi,
+  operation: (current: VibeGitService, ...args: TArgs) => Promise<TResult> | TResult
 ): void {
+  const channel = IPC_CHANNELS[method]
   ipcMain.handle(channel, async (event, ...args: TArgs) => {
     try {
       trustedSender(event)
-      return ok(await operation(...args))
+      const input = validateApiArguments(method, args) as TArgs
+      return ok(await services.run((current) => operation(current, ...input)))
     } catch (error) {
       const publicError = toPublicError(error)
       await diagnostic('ipc-error', { channel, code: publicError.code, message: publicError.message })
@@ -110,170 +106,92 @@ function registerHandler<TArgs extends unknown[], TResult>(
   })
 }
 
-function requiredService(): VibeGitService {
-  if (!service) throw new Error('VibeGit service is not ready')
-  return service
-}
-
-function reloadService(): VibeGitService {
-  const current = requiredService()
-  const { dataDirectory, commandTimeoutMs } = current.settings
-  current.close()
-  service = new VibeGitService({ dataDirectory, commandTimeoutMs })
-  return service
-}
-
-function requireString(value: unknown, field: string, maxLength = 10_000): string {
-  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) throw new Error(`${field} is invalid`)
-  return value
-}
-
-function requireRecord(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${field} is invalid`)
-  return value as Record<string, unknown>
-}
-
-function requireOptionalString(value: unknown, field: string, maxLength: number): string | undefined {
-  return value === undefined ? undefined : requireString(value, field, maxLength)
-}
-
 function registerIpc(): void {
-  registerHandler(IPC_CHANNELS.health, () => requiredService().health())
-  registerHandler(IPC_CHANNELS.selectProjectDirectory, async () => {
+  registerHandler('health', (current) => current.health())
+  registerHandler('selectProjectDirectory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: '选择要保护的项目文件夹',
       properties: ['openDirectory', 'createDirectory']
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })
-  registerHandler(IPC_CHANNELS.listProjects, () => requiredService().listProjects())
-  registerHandler(IPC_CHANNELS.addProject, (input: AddProjectInput) => {
-    const record = requireRecord(input, 'input')
-    const path = requireString(record.path, 'path')
-    if (record.initialize !== undefined && typeof record.initialize !== 'boolean') throw new Error('initialize is invalid')
-    return requiredService().addProject({ path, ...(record.initialize === true ? { initialize: true } : {}) })
-  })
-  registerHandler(IPC_CHANNELS.removeProject, (projectId: string) => requiredService().removeProject(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.refreshProject, (projectId: string) => requiredService().refreshProject(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.initializeProtection, (projectId: string) => requiredService().initializeProtection(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.listCheckpoints, (projectId: string) => requiredService().listCheckpoints(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.createCheckpoint, (input: CreateCheckpointInput) => {
-    const record = requireRecord(input, 'input')
-    const projectId = requireString(record.projectId, 'projectId', 100)
-    const title = requireString(record.title, 'title', 160)
-    if (record.type !== 'manual' && record.type !== 'stable') throw new Error('type is invalid')
-    const note = requireOptionalString(record.note, 'note', 2_000)
-    return requiredService().createCheckpoint({
-      projectId,
-      type: record.type,
-      title,
-      agent: 'manual',
-      isStable: record.type === 'stable',
-      ...(note ? { note } : {})
-    })
-  })
-  registerHandler(IPC_CHANNELS.renameCheckpoint, (checkpointId: string, title: string) => requiredService().renameCheckpoint(
-    requireString(checkpointId, 'checkpointId', 100),
-    requireString(title, 'title', 160)
-  ))
-  registerHandler(IPC_CHANNELS.deleteCheckpoint, (checkpointId: string) => requiredService().deleteCheckpoint(requireString(checkpointId, 'checkpointId', 100)))
-  registerHandler(IPC_CHANNELS.getCheckpointDiff, (checkpointId: string) => requiredService().getCheckpointDiff(requireString(checkpointId, 'checkpointId', 100)))
-  registerHandler(IPC_CHANNELS.prepareRestore, (projectId: string, checkpointId: string) => requiredService().prepareRestore(
-    requireString(projectId, 'projectId', 100),
-    requireString(checkpointId, 'checkpointId', 100)
-  ))
-  registerHandler(IPC_CHANNELS.executeRestore, (token: string) => requiredService().executeRestore(requireString(token, 'token', 100)))
-  registerHandler(IPC_CHANNELS.undoRestore, (restoreId: string) => requiredService().undoRestore(requireString(restoreId, 'restoreId', 100)))
-  registerHandler(IPC_CHANNELS.failedRestoreForToken, (token: string) => requiredService().getFailedRestoreForToken(requireString(token, 'token', 100)))
-  registerHandler(IPC_CHANNELS.listFailedRestores, (projectId: string) => requiredService().listFailedRestores(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.openRecoveryDirectory, async (restoreId: string) => {
-    const record = requiredService().getRestore(requireString(restoreId, 'restoreId', 100))
+  registerHandler('listProjects', (current) => current.listProjects())
+  registerHandler('addProject', (current, input: AddProjectInput) => current.addProject(input))
+  registerHandler('removeProject', (current, projectId: string) => current.removeProject(projectId))
+  registerHandler('refreshProject', (current, projectId: string) => current.refreshProject(projectId))
+  registerHandler('initializeProtection', (current, projectId: string) => current.initializeProtection(projectId))
+  registerHandler('listCheckpoints', (current, projectId: string) => current.listCheckpoints(projectId))
+  registerHandler('createCheckpoint', (current, input: CreateCheckpointInput) => current.createCheckpoint(input))
+  registerHandler('renameCheckpoint', (current, checkpointId: string, title: string) => current.renameCheckpoint(checkpointId, title))
+  registerHandler('deleteCheckpoint', (current, checkpointId: string) => current.deleteCheckpoint(checkpointId))
+  registerHandler('getCheckpointDiff', (current, checkpointId: string) => current.getCheckpointDiff(checkpointId))
+  registerHandler('prepareRestore', (current, projectId: string, checkpointId: string) => current.prepareRestore(projectId, checkpointId))
+  registerHandler('executeRestore', (current, token: string) => current.executeRestore(token))
+  registerHandler('undoRestore', (current, restoreId: string) => current.undoRestore(restoreId))
+  registerHandler('failedRestoreForToken', (current, token: string) => current.getFailedRestoreForToken(token))
+  registerHandler('listFailedRestores', (current, projectId: string) => current.listFailedRestores(projectId))
+  registerHandler('openRecoveryDirectory', async (current, restoreId: string) => {
+    const record = current.getRestore(restoreId)
     if (!record.recoveryDirectory) return false
     return (await shell.openPath(record.recoveryDirectory)) === ''
   })
-  registerHandler(IPC_CHANNELS.listShelves, (projectId: string) => requiredService().listShelves(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.createShelf, (projectId: string, title: string) => requiredService().createShelf(
-    requireString(projectId, 'projectId', 100),
-    requireString(title, 'title', 160)
-  ))
-  registerHandler(IPC_CHANNELS.retrieveShelf, (shelfId: string) => requiredService().retrieveShelf(requireString(shelfId, 'shelfId', 100)))
-  registerHandler(IPC_CHANNELS.githubStatus, () => requiredService().githubStatus())
-  registerHandler(IPC_CHANNELS.githubAuthorize, () => requiredService().authorizeGitHub())
-  registerHandler(IPC_CHANNELS.githubAuthorizationStatus, () => requiredService().githubAuthorizationStatus())
-  registerHandler(IPC_CHANNELS.githubScan, (projectId: string) => requiredService().scanSensitiveFiles(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.githubCreatePrivate, (input: CreatePrivateRepositoryInput) => {
-    const record = requireRecord(input, 'input')
-    const projectId = requireString(record.projectId, 'projectId', 100)
-    const name = requireString(record.name, 'name', 100)
-    const owner = requireOptionalString(record.owner, 'owner', 100)
-    return requiredService().createPrivateRepository({ projectId, name, ...(owner ? { owner } : {}) })
-  })
-  registerHandler(IPC_CHANNELS.githubConnect, (input: ConnectRemoteInput) => {
-    const record = requireRecord(input, 'input')
-    return requiredService().connectRemote({
-      projectId: requireString(record.projectId, 'projectId', 100),
-      remoteUrl: requireString(record.remoteUrl, 'remoteUrl', 2_000)
-    })
-  })
-  registerHandler(IPC_CHANNELS.githubPush, (projectId: string) => requiredService().pushToGitHub(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.githubIgnoreRisk, (projectId: string, risk: SensitiveRisk) => {
-    requireString(projectId, 'projectId', 100)
-    const record = requireRecord(risk, 'risk')
-    const kind = record.kind
-    const allowedKinds = new Set([
-      'sensitive_path', 'private_key', 'api_key', 'access_token', 'credentials',
-      'database', 'large_file', 'lfs_pointer', 'dependency_directory', 'build_artifact'
-    ])
-    if (typeof kind !== 'string' || !allowedKinds.has(kind)) throw new Error('risk.kind is invalid')
-    return requiredService().ignoreSensitiveRisk(projectId, {
-      path: requireString(record.path, 'risk.path', 10_000),
-      kind: kind as SensitiveRisk['kind'],
-      severity: 'blocked',
-      message: '由主进程重新扫描确认'
-    })
-  })
-  registerHandler(IPC_CHANNELS.minimizeWindow, () => { mainWindow?.minimize(); return true })
-  registerHandler(IPC_CHANNELS.toggleMaximizeWindow, () => {
+  registerHandler('listShelves', (current, projectId: string) => current.listShelves(projectId))
+  registerHandler('createShelf', (current, projectId: string, title: string) => current.createShelf(projectId, title))
+  registerHandler('retrieveShelf', (current, shelfId: string) => current.retrieveShelf(shelfId))
+  registerHandler('githubStatus', (current) => current.githubStatus())
+  registerHandler('githubAuthorize', (current) => current.authorizeGitHub())
+  registerHandler('githubAuthorizationStatus', (current) => current.githubAuthorizationStatus())
+  registerHandler('githubScan', (current, projectId: string) => current.scanSensitiveFiles(projectId))
+  registerHandler('githubCreatePrivate', (current, input: CreatePrivateRepositoryInput) => current.createPrivateRepository(input))
+  registerHandler('githubConnect', (current, input: ConnectRemoteInput) => current.connectRemote(input))
+  registerHandler('githubPush', (current, projectId: string) => current.pushToGitHub(projectId))
+  registerHandler('githubIgnoreRisk', (current, projectId: string, risk: SensitiveRisk) => current.ignoreSensitiveRisk(projectId, risk))
+  registerHandler('minimizeWindow', () => { mainWindow?.minimize(); return true })
+  registerHandler('toggleMaximizeWindow', () => {
     if (!mainWindow) return false
     if (mainWindow.isMaximized()) mainWindow.unmaximize()
     else mainWindow.maximize()
     return true
   })
-  registerHandler(IPC_CHANNELS.closeWindow, () => { mainWindow?.close(); return true })
-  registerHandler(IPC_CHANNELS.agentStatus, () => requiredService().agentStatus())
-  registerHandler(IPC_CHANNELS.listAgentEvents, (projectId: string) => requiredService().listAgentEvents(requireString(projectId, 'projectId', 100)))
-  registerHandler(IPC_CHANNELS.getSettings, () => requiredService().settings)
-  registerHandler(IPC_CHANNELS.selectDataDirectory, async () => {
+  registerHandler('closeWindow', () => { mainWindow?.close(); return true })
+  registerHandler('agentStatus', (current) => current.agentStatus())
+  registerHandler('listAgentEvents', (current, projectId: string) => current.listAgentEvents(projectId))
+  registerHandler('getSettings', (current) => current.settings)
+  registerHandler('selectDataDirectory', async () => {
     const result = await dialog.showOpenDialog(mainWindow!, {
       title: '选择 VibeGit 本地记录位置',
       properties: ['openDirectory', 'createDirectory']
     })
     return result.canceled ? null : result.filePaths[0] ?? null
   })
-  registerHandler(IPC_CHANNELS.setDataDirectory, async (path: string) => {
-    const dataDirectory = resolve(requireString(path, 'path', 10_000))
+  registerHandler('setDataDirectory', async (current, path: string) => {
+    const dataDirectory = resolve(path)
     await mkdir(dataDirectory, { recursive: true })
     await saveDataDirectoryPreference(dataDirectory)
-    return { dataDirectory, restartRequired: dataDirectory !== requiredService().settings.dataDirectory }
+    return { dataDirectory, restartRequired: dataDirectory !== current.settings.dataDirectory }
   })
-  registerHandler(IPC_CHANNELS.checkEnvironment, async () => {
-    let github = await requiredService().githubStatus()
-    let githubCliInstallAttempted = false
-    if (!github.installed) {
-      githubCliInstallAttempted = true
-      await installGitHubCli()
-      github = await reloadService().githubStatus()
-    }
-    const agents = await requiredService().agentStatus({ scanAllDrives: true })
-    const changeSummarySkill = await requiredService().changeSummarySkillStatus(agents)
-    return {
-      github,
-      agents,
-      changeSummarySkill,
-      githubCliInstallAttempted,
-      githubCliInstalled: githubCliInstallAttempted && github.installed,
-      message: github.installed ? 'Environment check completed.' : 'GitHub CLI is not available.'
-    }
+  let environmentCheck: Promise<EnvironmentCheckResult> | undefined
+  registerHandler('checkEnvironment', (current) => {
+    environmentCheck ??= (async () => {
+      const githubBefore = await current.githubStatus()
+      const githubCliInstallAttempted = !githubBefore.installed
+      if (githubCliInstallAttempted) {
+        await installGitHubCli()
+        const { dataDirectory, commandTimeoutMs } = current.settings
+        services.replace(new VibeGitService({ dataDirectory, commandTimeoutMs }))
+      }
+      return await services.run(async (updated) => {
+        const github = githubCliInstallAttempted ? await updated.githubStatus() : githubBefore
+        const agents = await updated.agentStatus({ scanAllDrives: true })
+        const changeSummarySkill = await updated.changeSummarySkillStatus(agents)
+        return {
+          github, agents, changeSummarySkill, githubCliInstallAttempted,
+          githubCliInstalled: githubCliInstallAttempted && github.installed,
+          message: github.installed ? 'Environment check completed.' : 'GitHub CLI is not available.'
+        }
+      })
+    })().finally(() => { environmentCheck = undefined })
+    return environmentCheck
   })
 }
 
@@ -335,7 +253,7 @@ if (!ownsSingleInstanceLock) {
     const dataDirectory = defaultDataDirectory()
     await mkdir(join(dataDirectory, 'logs'), { recursive: true })
     diagnosticsPath = join(dataDirectory, 'logs', 'diagnostics.jsonl')
-    service = new VibeGitService({ dataDirectory })
+    services.replace(new VibeGitService({ dataDirectory }))
     registerIpc()
     await createWindow()
     await diagnostic('app-ready', { version: app.getVersion() })
@@ -353,6 +271,5 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  service?.close()
-  service = undefined
+  services.close()
 })

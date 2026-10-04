@@ -17,6 +17,8 @@
 
 - 桌面和 CLI/Hook 共用本地记录目录偏好，保留显式 `VIBEGIT_DATA_DIR` 优先级；偏好使用同目录原子替换，不迁移或删除旧记录。
 - Agent 功能摘要入盘及读取均验证和脱敏；仅在事件持久化成功后消费，失败可重试。脱敏覆盖引用凭据、认证头和不完整私钥块。
+- 项目保护标记拒绝符号链接、硬链接、非普通文件和过大内容；通过验证后的句柄读取，以同目录临时文件原子替换，避免沿链接覆盖其他文件。
+- 失败任务的 StopFailure 事件立即保存失败保护点，不因缺少功能说明而阻止保护。
 
 - Hook 只处理已登记并已开启保护的项目；子目录 `cwd` 会归属到最深的已登记项目根。
 - Agent 事件按 `(project, agent, session)` 关联 task-start；source event ID 幂等去重，任务文本先脱敏后保存。
@@ -27,6 +29,9 @@
 
 - `.gitignore` 自动更新拒绝符号链接、硬链接和非普通文件；读取与追加使用同一已验证句柄。
 - 专用 SSH 命令使用 shell 字面参数引用；gh/SSH 标准输出与错误输出合计限制为 4 MiB。
+- 托管 SSH 使用 `-F none` 与 `IdentityAgent=none`，不读取用户 SSH 配置或使用 ssh-agent；保留专用 known_hosts 与主机密钥验证。依赖自定义 Host/ProxyCommand 的网络配置不会自动应用到托管备份。
+- gh/SSH 超时或输出超限时，仅终止本次工具的进程树/进程组并等待退出；无法确认所有子进程退出时返回明确错误，不声称已经完全清理。
+- SSH metadata 写入也要求独立普通文件，并使用已验证句柄；npm 配置扫描覆盖 `_password` 基本认证字段。
 
 - `gh` 调用固定 `GH_HOST=github.com`，状态和用户 API 明确指定 `github.com`；不信任环境中的 Enterprise host 重定向。
 - 创建仓库始终传 `--private`，创建/连接/每次 push 前都验证 Private 可见性。

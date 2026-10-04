@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import childProcess from 'node:child_process'
 import { EventEmitter } from 'node:events'
@@ -139,8 +139,10 @@ describe('GitEngine', () => {
     await git.runner.run(root, ['add', '--', 'app.txt'])
     const indexBefore = (await git.runner.run(root, ['write-tree'])).stdout.trim()
     await writeFile(join(root, 'app.txt'), 'working\n', 'utf8')
+    const realIndexBytes = await readFile(join(root, '.git', 'index'))
 
     const captured = await git.captureWorktreeTree(root)
+    expect(await readFile(join(root, '.git', 'index'))).toEqual(realIndexBytes)
     const entry = (await git.listTree(root, captured.treeObjectId)).find((item) => item.path === 'app.txt')
     expect(entry).toBeDefined()
     expect((await git.readBlob(root, entry!.objectId)).toString('utf8')).toBe('working\n')
@@ -148,6 +150,110 @@ describe('GitEngine', () => {
     expect((await git.runner.run(root, ['rev-parse', 'HEAD'])).stdout.trim()).toBe(headBefore)
     expect(await readFile(join(root, 'app.txt'), 'utf8')).toBe('working\n')
     await rm(root, { recursive: true, force: true })
+  })
+
+  it.each([false, true])('reuses tracked stat data with split index %s while capturing hidden worktree edits', async (splitIndex) => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-index-cache-'))
+    const project = join(root, 'project')
+    const filterScript = join(root, 'clean.cjs')
+    const filterLog = join(root, 'clean.log')
+    const git = new GitEngine()
+    try {
+      await git.initialize(project)
+      await writeFile(filterScript, [
+        "const fs = require('node:fs');",
+        `fs.appendFileSync(${JSON.stringify(filterLog)}, 'clean\\n');`,
+        'process.stdout.write(fs.readFileSync(0));'
+      ].join('\n'))
+      const filterCommand = `"${process.execPath.replaceAll('\\', '/')}" "${filterScript.replaceAll('\\', '/')}"`
+      await git.runner.run(project, ['config', 'filter.audit.clean', filterCommand])
+      await writeFile(join(project, '.gitattributes'), '*.txt filter=audit\n')
+      for (const name of ['unchanged.txt', 'assumed.txt', 'skipped.txt']) {
+        await writeFile(join(project, name), `original ${name}\n`)
+        const beforeIndex = new Date(Date.now() - 10_000)
+        await utimes(join(project, name), beforeIndex, beforeIndex)
+      }
+      await git.runner.run(project, ['add', '.'])
+      await git.runner.run(project, ['update-index', '--assume-unchanged', 'assumed.txt'])
+      await git.runner.run(project, ['update-index', '--skip-worktree', 'skipped.txt'])
+      if (splitIndex) {
+        await git.runner.run(project, ['config', 'core.splitIndex', 'true'])
+        await git.runner.run(project, ['update-index', '--split-index'])
+      }
+      await writeFile(join(project, 'assumed.txt'), 'modified despite assume-unchanged\n')
+      await writeFile(join(project, 'skipped.txt'), 'modified despite skip-worktree\n')
+      const indexBefore = await readFile(join(project, '.git', 'index'))
+      await writeFile(filterLog, '')
+
+      const captured = await git.captureWorktreeTree(project)
+      const entries = await git.listTree(project, captured.treeObjectId)
+      for (const [name, expected] of [
+        ['unchanged.txt', 'original unchanged.txt\n'],
+        ['assumed.txt', 'modified despite assume-unchanged\n'],
+        ['skipped.txt', 'modified despite skip-worktree\n']
+      ]) {
+        const entry = entries.find((item) => item.path === name)!
+        expect((await git.readBlob(project, entry.objectId)).toString()).toBe(expected)
+      }
+      // Only changed files should enter the content pipeline. read-tree based
+      // staging rehashed all three files, including the untouched one.
+      expect((await readFile(filterLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+      expect(await readFile(join(project, '.git', 'index'))).toEqual(indexBefore)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('fails safely on unresolved conflicts without staging markers or changing the real index', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-unmerged-index-'))
+    const git = new GitEngine()
+    try {
+      await git.initialize(root)
+      const objectId = (await git.runner.run(root, ['hash-object', '-w', '--stdin'], { stdin: 'base\n' })).stdout.trim()
+      await git.runner.run(root, ['update-index', '--index-info'], {
+        stdin: [1, 2, 3].map((stage) => `100644 ${objectId} ${stage}\tconflict.txt\n`).join('')
+      })
+      await writeFile(join(root, 'conflict.txt'), '<<<<<<< ours\n=======\n>>>>>>> theirs\n')
+      const indexBefore = await readFile(join(root, '.git', 'index'))
+      await expect(git.captureWorktreeTree(root)).rejects.toMatchObject({ code: 'GIT_COMMAND_FAILED' })
+      expect(await readFile(join(root, '.git', 'index'))).toEqual(indexBefore)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('does not hide same-size edits with a racy index timestamp', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-racy-index-'))
+    const git = new GitEngine()
+    try {
+      await git.initialize(root)
+      await git.runner.run(root, ['config', 'core.trustctime', 'false'])
+      const path = join(root, 'racy.txt')
+      const timestamp = new Date(Date.now() - 10_000)
+      await writeFile(path, 'before\n')
+      await utimes(path, timestamp, timestamp)
+      await git.runner.run(root, ['add', '--', 'racy.txt'])
+      await utimes(join(root, '.git', 'index'), timestamp, timestamp)
+      await writeFile(path, 'after \n')
+      await utimes(path, timestamp, timestamp)
+
+      const captured = await git.captureWorktreeTree(root)
+      const entry = (await git.listTree(root, captured.treeObjectId)).find((item) => item.path === 'racy.txt')!
+      expect((await git.readBlob(root, entry.objectId)).toString()).toBe('after \n')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('handles a command closing stdin early without an unhandled stream error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-stdin-close-'))
+    try {
+      const runner = new GitCommandRunner({ executable: process.execPath })
+      await expect(runner.run(root, ['-e', 'process.exit(1)'], { stdin: Buffer.alloc(8 * 1024 * 1024) }))
+        .rejects.toMatchObject({ code: 'GIT_COMMAND_FAILED' })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('captures and compares a many-file working copy without losing paths', async () => {

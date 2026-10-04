@@ -381,6 +381,7 @@ export class VibeGitDatabase {
       } catch {
         // Preserve the original error.
       }
+      if (error instanceof VibeGitError) throw error
       throw new VibeGitError('DATABASE_TRANSACTION_FAILED', '本地记录未能安全保存', {
         detail: error instanceof Error ? error.message : String(error),
         remediation: '项目文件没有被删除。请关闭占用数据库的进程后重试。',
@@ -451,8 +452,11 @@ export class VibeGitDatabase {
     return rows.map(mapProject)
   }
 
-  deleteProject(projectId: string): void {
+  deleteProject(projectId: string, operationOwnerId?: string): void {
     this.transaction(() => {
+      if (operationOwnerId && !this.hasProjectOperation(projectId, operationOwnerId)) {
+        throw new VibeGitError('PROJECT_OPERATION_LEASE_LOST', '项目安全锁已失效，已停止删除本地记录')
+      }
       this.db.prepare('DELETE FROM shelves WHERE project_id = ?').run(projectId)
       this.db.prepare('DELETE FROM agent_events WHERE project_id = ?').run(projectId)
       this.db.prepare('DELETE FROM restores WHERE project_id = ?').run(projectId)
@@ -623,9 +627,12 @@ export class VibeGitDatabase {
     return checkpoint
   }
 
-  deleteCheckpoint(checkpointId: string): Checkpoint {
+  deleteCheckpoint(checkpointId: string, operationOwnerId?: string): Checkpoint {
     return this.transaction(() => {
       const checkpoint = this.prepareCheckpointDeletion(checkpointId)
+      if (operationOwnerId && !this.hasProjectOperation(checkpoint.projectId, operationOwnerId)) {
+        throw new VibeGitError('PROJECT_OPERATION_LEASE_LOST', '项目安全锁已失效，已停止删除本地记录')
+      }
 
       const activeRow = this.db.prepare('SELECT active_checkpoint_id FROM projects WHERE id = ?').get(checkpoint.projectId) as { active_checkpoint_id: string | null } | undefined
       const fallback = checkpoint.parentCheckpointId

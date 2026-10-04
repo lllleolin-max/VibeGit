@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { request as httpRequest } from 'node:http'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -60,6 +61,20 @@ describe('browser compatibility API boundary', () => {
     expect((await invoke('{"method":"listProjects","args":[]}', 'https://untrusted.example')).status).toBe(403)
   })
 
+  it('rejects a foreign host even when the request claims the local origin', async () => {
+    const status = await new Promise<number | undefined>((resolveResponse, reject) => {
+      const request = httpRequest(`${origin}/api/invoke`, {
+        method: 'POST', headers: { origin, host: 'untrusted.example', 'content-type': 'application/json' }
+      }, (response) => {
+        response.resume()
+        response.once('end', () => resolveResponse(response.statusCode))
+      })
+      request.once('error', reject)
+      request.end('{"method":"listProjects","args":[]}')
+    })
+    expect(status).toBe(403)
+  })
+
   it('exposes safe authorization progress without starting a login', async () => {
     expect(await (await invoke('{"method":"githubAuthorizationStatus","args":[]}')).json()).toMatchObject({
       ok: true, data: { phase: 'idle' }
@@ -79,8 +94,37 @@ describe('browser compatibility API boundary', () => {
   })
 
   it.each(['selectDataDirectory', 'setDataDirectory', 'minimizeWindow', 'toggleMaximizeWindow', 'closeWindow'])('reports unsupported desktop action %s', async (method) => {
-    expect(await (await invoke(JSON.stringify({ method, args: [] }))).json()).toMatchObject({
+    expect(await (await invoke(JSON.stringify({ method, args: method === 'setDataDirectory' ? ['C:/unused'] : [] }))).json()).toMatchObject({
       ok: false, error: { code: 'BROWSER_DESKTOP_REQUIRED' }
     })
   })
+
+  it.each([
+    ['addProject', [{ path: 42 }]],
+    ['addProject', [{ path: 'unused', initialize: 'yes' }]],
+    ['createCheckpoint', [{ projectId: 'project', title: 'spoofed', type: 'pre_restore' }]],
+    ['renameCheckpoint', ['checkpoint', 'x'.repeat(161)]],
+    ['githubIgnoreRisk', ['project', { path: '.env', kind: 'unknown' }]],
+    ['listProjects', ['unexpected argument']],
+    ['removeProject', []]
+  ])('rejects invalid %s arguments before reaching the service', async (method, args) => {
+    expect(await (await invoke(JSON.stringify({ method, args }))).json()).toMatchObject({
+      ok: false, error: { code: 'INVALID_API_ARGUMENT' }
+    })
+  })
+
+  it('does not let the browser impersonate an agent or supply internal checkpoint fields', async () => {
+    const projectPath = join(root!, 'synthetic-project')
+    await mkdir(projectPath)
+    await writeFile(join(projectPath, 'README.md'), '# First version\n')
+    const added = await (await invoke(JSON.stringify({ method: 'addProject', args: [{ path: projectPath, initialize: true }] }))).json() as { ok: boolean; data: { id: string } }
+    expect(added.ok).toBe(true)
+    await writeFile(join(projectPath, 'README.md'), '# Second version\n')
+    const created = await (await invoke(JSON.stringify({ method: 'createCheckpoint', args: [{
+      projectId: added.data.id, title: 'From browser', type: 'manual',
+      agent: 'codex', isStable: true, operationId: 'spoofed-operation', relatedCheckpointId: 'spoofed-checkpoint'
+    }] }))).json()
+    expect(created).toMatchObject({ ok: true, data: { title: 'From browser', type: 'manual', agent: 'manual', isStable: false } })
+    expect(created.data.relatedCheckpointId).toBeUndefined()
+  }, 30_000)
 })

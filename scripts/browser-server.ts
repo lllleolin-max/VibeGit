@@ -3,6 +3,7 @@ import { readFile, stat } from 'node:fs/promises'
 import { extname, relative, resolve, sep } from 'node:path'
 import { spawn } from 'node:child_process'
 import { defaultDataDirectory, VibeGitService } from '@vibegit/core'
+import { validateApiArguments } from '../apps/desktop/src/api-validation'
 import {
   VibeGitError,
   fail,
@@ -144,7 +145,7 @@ async function handleApi(request: IncomingMessage, response: ServerResponse): Pr
   }
   try {
     const invocation = await readInvocation(request)
-    sendJson(response, 200, ok(await actions[invocation.method](invocation.args)))
+    sendJson(response, 200, ok(await actions[invocation.method](validateApiArguments(invocation.method, invocation.args))))
   } catch (error) {
     sendJson(response, 200, fail(error))
   }
@@ -193,6 +194,11 @@ async function handleStatic(request: IncomingMessage, response: ServerResponse):
 }
 
 const server = createServer((request, response) => {
+  // Reject foreign Host headers as well as Origin, including DNS rebinding.
+  if (request.headers.host !== new URL(origin).host) {
+    sendJson(response, 403, fail(new VibeGitError('BROWSER_REQUEST_REJECTED', '已拒绝非本机界面的请求')))
+    return
+  }
   void (request.url?.startsWith('/api/') ? handleApi(request, response) : handleStatic(request, response))
     .catch((error: unknown) => sendJson(response, 500, fail(error)))
 })

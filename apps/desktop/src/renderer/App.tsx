@@ -715,12 +715,11 @@ export function App(): ReactNode {
   }
 
   const undoRestore = async (restore: RestoreRecord): Promise<void> => {
-    if (!selectedProject) return
     setBusy('undo-restore')
     try {
       unwrap(await window.vibegit.undoRestore(restore.id))
       setNotice({ message: '已撤销本次回退，文件恢复到回退前状态' })
-      await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
+      await Promise.all([loadProjects(restore.projectId), loadTimeline(restore.projectId)])
     } catch (value) {
       setError(errorFrom(value))
     } finally {
@@ -841,8 +840,9 @@ export function App(): ReactNode {
           project={selectedProject}
           onClose={() => setModal(null)}
           onChanged={async (message) => {
-            await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)])
             setNotice({ message })
+            try { await Promise.all([loadProjects(selectedProject.id), loadTimeline(selectedProject.id)]) }
+            catch { setError({ code: 'VIEW_REFRESH_FAILED', message: '修改操作已完成，但项目列表暂未刷新', remediation: '无需重复操作；关闭弹窗后刷新项目状态。', retryable: true }) }
           }}
           onError={reportError}
         />
@@ -1207,47 +1207,59 @@ function ShelfModal(props: { project: Project; onClose(): void; onChanged(messag
   const [title, setTitle] = useState('当前未完成修改')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState<string>()
+  const [loadError, setLoadError] = useState<PublicError>()
+  const requestSequence = useRef(0)
+  const operationPending = useRef(false)
   const { project, onError } = props
   const load = useCallback(async () => {
-    try { setShelves(unwrap(await window.vibegit.listShelves(project.id))) }
-    catch (value) { onError(value) }
-    finally { setLoading(false) }
-  }, [project.id, onError])
+    const request = ++requestSequence.current
+    try {
+      const result = unwrap(await window.vibegit.listShelves(project.id))
+      if (request === requestSequence.current) { setShelves(result); setLoadError(undefined) }
+    } catch (value) {
+      if (request === requestSequence.current) setLoadError(errorFrom(value))
+    } finally { if (request === requestSequence.current) setLoading(false) }
+  }, [project.id])
   useEffect(() => {
-    let active = true
+    const request = ++requestSequence.current
     void window.vibegit.listShelves(project.id)
-      .then((result) => { if (active) setShelves(unwrap(result)) })
-      .catch((value: unknown) => { if (active) onError(value) })
-      .finally(() => { if (active) setLoading(false) })
-    return () => { active = false }
-  }, [project.id, onError])
+      .then((result) => { if (request === requestSequence.current) setShelves(unwrap(result)) })
+      .catch((value: unknown) => { if (request === requestSequence.current) setLoadError(errorFrom(value)) })
+      .finally(() => { if (request === requestSequence.current) setLoading(false) })
+    return () => { requestSequence.current += 1 }
+  }, [project.id])
 
   const create = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
-    if (busy || !title.trim()) return
+    if (operationPending.current || !title.trim()) return
+    operationPending.current = true
     setBusy('create')
     try {
-      unwrap(await window.vibegit.createShelf(project.id, title.trim()))
+      const created = unwrap(await window.vibegit.createShelf(project.id, title.trim()))
+      setShelves((current) => [created, ...current.filter((shelf) => shelf.id !== created.id)])
       await load()
       await props.onChanged('当前修改已暂时收起，随时可以取回')
     } catch (value) { onError(value) }
-    finally { setBusy(undefined) }
+    finally { operationPending.current = false; setBusy(undefined) }
   }
   const retrieve = async (shelf: ShelvedChange): Promise<void> => {
+    if (operationPending.current) return
+    operationPending.current = true
     setBusy(shelf.id)
     try {
-      unwrap(await window.vibegit.retrieveShelf(shelf.id))
+      const retrieved = unwrap(await window.vibegit.retrieveShelf(shelf.id))
+      setShelves((current) => current.map((entry) => entry.id === retrieved.id ? retrieved : entry))
       await load()
       await props.onChanged(`已取回“${shelf.title}”`)
     } catch (value) { onError(value) }
-    finally { setBusy(undefined) }
+    finally { operationPending.current = false; setBusy(undefined) }
   }
 
   return <ModalFrame title="暂时收起修改" subtitle="把未完成的修改安全隐藏起来，之后可以完整取回；不会直接删除新增文件。" onClose={props.onClose} busy={Boolean(busy)}>
     <div className="shelf-content">
       <form className="shelf-create" onSubmit={(event) => void create(event)}><label>这组修改的名称<input value={title} onChange={(event) => setTitle(event.target.value)} maxLength={160} /></label><button className="button primary" disabled={!title.trim() || Boolean(busy)}>{busy === 'create' ? <LoaderCircle className="spin" size={16} /> : <Archive size={16} />}安全收起当前修改</button></form>
       <div className="shelf-note"><ShieldCheck size={17} /><p>收起前会先创建保存点；取回时如果当前项目又有变化，也会先建立保险点。</p></div>
-      <div className="shelf-list"><div className="section-title"><div><h3>已经收起的修改</h3><p>只有“等待取回”的记录可以操作。</p></div></div>{loading ? <LoadingView compact label="正在读取…" /> : shelves.filter((shelf) => shelf.status === 'active').length === 0 ? <div className="empty-shelves"><Archive size={22} /><span>还没有暂时收起的修改</span></div> : shelves.filter((shelf) => shelf.status === 'active').map((shelf) => <div className="shelf-row" key={shelf.id}><ArchiveRestore size={18} /><div><strong>{shelf.title}</strong><small>{formatRelativeTime(shelf.createdAt)}</small></div><button className="button secondary small" disabled={Boolean(busy)} onClick={() => void retrieve(shelf)}>{busy === shelf.id ? <LoaderCircle className="spin" size={14} /> : <ArchiveRestore size={14} />}取回修改</button></div>)}</div>
+      <div className="shelf-list"><div className="section-title"><div><h3>已经收起的修改</h3><p>只有“等待取回”的记录可以操作。</p></div></div>{loading ? <LoadingView compact label="正在读取…" /> : loadError ? <div className="empty-diff" role="alert"><strong>暂存记录暂时无法读取</strong><span>{loadError.message}</span><button className="button secondary" disabled={Boolean(busy)} onClick={() => { setLoading(true); void load() }}>重新读取暂存记录</button></div> : shelves.filter((shelf) => shelf.status === 'active').length === 0 ? <div className="empty-shelves"><Archive size={22} /><span>还没有暂时收起的修改</span></div> : shelves.filter((shelf) => shelf.status === 'active').map((shelf) => <div className="shelf-row" key={shelf.id}><ArchiveRestore size={18} /><div><strong>{shelf.title}</strong><small>{formatRelativeTime(shelf.createdAt)}</small></div><button className="button secondary small" disabled={Boolean(busy)} onClick={() => void retrieve(shelf)}>{busy === shelf.id ? <LoaderCircle className="spin" size={14} /> : <ArchiveRestore size={14} />}取回修改</button></div>)}</div>
       <div className="modal-actions"><button className="button ghost" onClick={props.onClose} disabled={Boolean(busy)}>关闭</button></div>
     </div>
   </ModalFrame>

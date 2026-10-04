@@ -213,6 +213,21 @@ describe('GitHubProvider mock contract', () => {
     expect(vi.mocked(executor).mock.calls.filter(([, args]) => args[0] === 'auth' && args[1] === 'login')).toHaveLength(1)
   })
 
+  it('refuses a linked metadata record before provisioning and preserves the external file', async () => {
+    sandbox = await createSandbox()
+    const systemExecutor: SystemExecutor = vi.fn(async () => ({ exitCode: 0, stdout: `${TEST_PUBLIC_KEY}\n`, stderr: '' }))
+    const provider = await managedProvider(sandbox, { systemExecutor })
+    const metadata = `${testKeyPath(sandbox.dataDirectory)}.json`
+    const outside = join(sandbox.root, 'unrelated-settings.json')
+    await rm(metadata)
+    await writeFile(outside, '{"preserve":"these settings"}\n')
+    await link(outside, metadata)
+
+    await expect(provider.authorizeAndProvisionSshKey(sandbox.projectPath)).rejects.toMatchObject({ code: 'SSH_KEY_INVALID' })
+    expect(systemExecutor).not.toHaveBeenCalled()
+    expect(await readFile(outside, 'utf8')).toBe('{"preserve":"these settings"}\n')
+  })
+
   it('clears failed authorization codes and allows a fresh retry without returning raw CLI output', async () => {
     sandbox = await createSandbox()
     let attempts = 0
@@ -367,6 +382,17 @@ setTimeout(() => process.exit(1), 750)
     const expectedKey = keyPath[keyPath.indexOf('-f') + 1]!.replaceAll('\\', '/')
     expect(args[args.indexOf('-i') + 1]).toBe(expectedKey)
     expect(args).toContain(`UserKnownHostsFile="${join(dataDirectory, 'ssh', 'known_hosts').replaceAll('\\', '/')}"`)
+    expect(args[args.indexOf('-F') + 1]).toBe('none')
+    // OpenSSH's configuration-only mode makes no network connection. Verify
+    // Windows/OpenSSH accepts the isolated configuration and selected identity.
+    const sshConfiguration = execFileSync('ssh', [...args, '-G', '-p', '443', 'git@ssh.github.com'], {
+      encoding: 'utf8', windowsHide: true
+    }).split(/\r?\n/)
+    expect(sshConfiguration).toContain('hostname ssh.github.com')
+    expect(sshConfiguration).toContain('identityagent none')
+    expect(sshConfiguration).toContain('identitiesonly yes')
+    expect(sshConfiguration).toContain('stricthostkeychecking accept-new')
+    expect(sshConfiguration.filter((line) => line.startsWith('identityfile '))).toEqual([`identityfile ${expectedKey}`])
   })
 
   it('reports an installed but unauthenticated GitHub CLI and refuses repository creation', async () => {

@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { constants as fsConstants, existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, delimiter, dirname, join, resolve } from 'node:path'
-import { mkdir, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import packageMetadata from '../../../package.json' with { type: 'json' }
 import type {
   AddProjectInput,
   AgentConnectionStatus,
@@ -71,7 +72,22 @@ function installedChangeSummarySkill(path: string): boolean {
 
 async function readOptionalText(path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, 'utf8')
+    const before = await lstat(path)
+    const unsafe = () => new VibeGitError('UNSAFE_PROTECTION_MARKER', '项目保护标记不是安全的普通文件', {
+      remediation: '请移走保护标记的链接或异常文件后重试；VibeGit 不会修改它指向的文件。'
+    })
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > 16_384) throw unsafe()
+    const handle = await open(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+    try {
+      const current = await handle.stat()
+      if (!current.isFile() || current.nlink !== 1 || current.dev !== before.dev || current.ino !== before.ino) throw unsafe()
+      const buffer = Buffer.alloc(16_385)
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+      if (bytesRead > 16_384) throw unsafe()
+      return buffer.toString('utf8', 0, bytesRead)
+    } finally {
+      await handle.close()
+    }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
     throw error
@@ -105,7 +121,18 @@ async function ensureProjectProtectionMarker(git: GitEngine, projectPath: string
       })
     }
   }
-  if (existingMarker !== `${JSON.stringify(marker, null, 2)}\n`) await writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`, 'utf8')
+  const content = `${JSON.stringify(marker, null, 2)}\n`
+  if (existingMarker !== content) {
+    const temporaryPath = join(markerDirectory, `protected-${randomUUID()}.tmp`)
+    try {
+      await writeFile(temporaryPath, content, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+      // Atomic replacement never follows an attacker-swapped destination link,
+      // and a concurrent hook sees either the complete old or new marker.
+      await rename(temporaryPath, markerPath)
+    } finally {
+      await unlink(temporaryPath).catch(() => undefined)
+    }
+  }
 }
 
 async function hasProjectProtectionMarker(git: GitEngine, projectPath: string): Promise<boolean> {
@@ -196,18 +223,32 @@ async function runLocator(executable: string, args: string[], timeoutMs: number)
   return await new Promise((resolvePromise) => {
     const child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
-    child.stdout?.on('data', (chunk: Buffer | string) => { stdout += chunk.toString() })
-    const timer = setTimeout(() => {
-      try { child.kill() } catch { /* The process has already exited. */ }
-    }, timeoutMs)
-    child.on('error', () => {
+    let bytes = 0
+    let settled = false
+    const finish = (exitCode: number | null) => {
+      if (settled) return
+      settled = true
       clearTimeout(timer)
-      resolvePromise({ stdout: '', exitCode: null })
+      resolvePromise({ stdout: exitCode === 0 ? stdout : '', exitCode })
+    }
+    const stop = () => {
+      try { child.kill() } catch { /* Only this locator process is targeted. */ }
+      child.stdout.destroy()
+      child.stderr.destroy()
+      finish(null)
+    }
+    const timer = setTimeout(stop, timeoutMs)
+    child.stdout.on('data', (chunk: Buffer) => {
+      bytes += chunk.length
+      if (bytes > 1_048_576) stop()
+      else stdout += chunk.toString()
     })
-    child.on('close', (code) => {
-      clearTimeout(timer)
-      resolvePromise({ stdout, exitCode: code })
+    child.stderr.on('data', (chunk: Buffer) => {
+      bytes += chunk.length
+      if (bytes > 1_048_576) stop()
     })
+    child.on('error', () => finish(null))
+    child.on('close', finish)
   })
 }
 
@@ -338,7 +379,7 @@ export class VibeGitService {
       ready: this.database.health(),
       database: 'ok',
       git,
-      version: '1.0.0'
+      version: packageMetadata.version
     }
   }
 
@@ -372,6 +413,7 @@ export class VibeGitService {
     }
     const isGitRepository = Boolean(repositoryRoot)
     const now = new Date().toISOString()
+    const status = isGitRepository ? await this.git.getStatus(projectPath) : undefined
     const project: Project = {
       id: randomUUID(),
       name: basename(projectPath) || projectPath,
@@ -380,9 +422,9 @@ export class VibeGitService {
       lastActivityAt: now,
       isGitRepository,
       protectionEnabled: false,
-      hasUnsavedChanges: isGitRepository ? (await this.git.getStatus(projectPath)).hasChanges : true,
+      hasUnsavedChanges: status?.hasChanges ?? true,
       worktreeStatus: 'checked',
-      untrackedFiles: isGitRepository ? (await this.git.getStatus(projectPath)).untracked.length : 0,
+      untrackedFiles: status?.untracked.length ?? 0,
       githubSyncStatus: 'not_configured'
     }
     this.database.upsertProject(project)
@@ -391,14 +433,7 @@ export class VibeGitService {
   }
 
   async removeProject(projectId: string): Promise<RemoveProjectResult> {
-    const project = this.requireProject(projectId)
-    const checkpoints = this.database.listCheckpoints(project.id)
-    for (const checkpoint of checkpoints) {
-      try { await this.git.deleteCheckpointRef(project.path, checkpoint.id) }
-      catch { /* If the working repository has moved, still remove VibeGit's local registry. */ }
-    }
-    this.database.deleteProject(project.id)
-    return { projectId: project.id, removedCheckpoints: checkpoints.length }
+    return await this.checkpoints.removeProject(projectId)
   }
 
   async initializeProtection(projectId: string): Promise<{ project: Project; checkpoint: Checkpoint }> {
@@ -448,13 +483,12 @@ export class VibeGitService {
       return updated
     }
     if (project.protectionEnabled) await ensureProjectProtectionMarker(this.git, project.path)
+    const active = this.database.getActiveCheckpoint(projectId) ?? this.database.getLatestCheckpoint(projectId)
     const [status, remoteUrl, capture] = await Promise.all([
       this.git.getStatus(project.path),
       this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME),
-      this.git.captureWorktreeTree(project.path)
+      active ? this.git.captureWorktreeTree(project.path) : undefined
     ])
-    const latest = this.database.getLatestCheckpoint(projectId)
-    const active = this.database.getActiveCheckpoint(projectId) ?? latest
     const activeTree = active ? await this.git.getCommitTree(project.path, active.gitObjectId) : undefined
     // A background check can overlap a successful connection, push, or project
     // removal. Read current metadata only after all I/O and keep the following
@@ -472,7 +506,7 @@ export class VibeGitService {
         ...current,
         isGitRepository: true,
         protectionEnabled: current.protectionEnabled && Boolean(currentLatest),
-        hasUnsavedChanges: activeTree ? capture.treeObjectId !== activeTree : status.hasChanges,
+        hasUnsavedChanges: activeTree && capture ? capture.treeObjectId !== activeTree : status.hasChanges,
         worktreeStatus: currentActive?.id === active?.id ? 'checked' : 'unknown',
         untrackedFiles: status.untracked.length,
         lastActivityAt: currentLatest?.createdAt ?? current.lastActivityAt,
@@ -512,14 +546,7 @@ export class VibeGitService {
   }
 
   async deleteCheckpoint(checkpointId: string): Promise<{ checkpointId: string; projectId: string }> {
-    const checkpoint = this.database.prepareCheckpointDeletion(checkpointId)
-    const project = this.requireProject(checkpoint.projectId)
-    // Validate before removing the private Git ref. The database repeats the
-    // validation transactionally when it removes the record.
-    await this.git.deleteCheckpointRef(project.path, checkpoint.id)
-    this.database.deleteCheckpoint(checkpoint.id)
-    await this.refreshProject(project.id)
-    return { checkpointId: checkpoint.id, projectId: project.id }
+    return await this.checkpoints.deleteCheckpoint(checkpointId)
   }
 
   async getCheckpointDiff(checkpointId: string): Promise<CheckpointDiff> {

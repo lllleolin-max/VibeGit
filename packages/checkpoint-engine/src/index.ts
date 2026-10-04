@@ -16,6 +16,7 @@ import type {
   Checkpoint,
   CheckpointDiff,
   CreateCheckpointInput,
+  RemoveProjectResult,
   RestoreImpactFile,
   RestorePreview,
   RestoreRecord,
@@ -113,6 +114,7 @@ export class CheckpointEngine {
     let acquired = false
     try {
       while (!acquired && Date.now() <= deadline) {
+        if (!this.database.getProject(projectId)) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
         const now = Date.now()
         acquired = this.database.acquireProjectOperation(
           projectId,
@@ -166,6 +168,40 @@ export class CheckpointEngine {
     return await this.withProjectOperation(input.projectId, async () => await this.createLocked(input))
   }
 
+  async removeProject(projectId: string): Promise<RemoveProjectResult> {
+    return await this.withProjectOperation(projectId, async () => {
+      const project = this.database.getProject(projectId)
+      if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+      const checkpoints = this.database.listCheckpoints(projectId)
+      this.assertProjectOperation(projectId)
+      // Keep every ref intact until the registry deletion commits. Failure to
+      // clean up a moved/unavailable repository leaves only private orphan refs,
+      // never database records whose saved content has lost its protection.
+      this.database.deleteProject(projectId, this.operationOwnerId)
+      for (const checkpoint of checkpoints) {
+        try { await this.git.deleteCheckpointRef(project.path, checkpoint.id) }
+        catch { /* The removed project's files and any remaining refs stay intact. */ }
+      }
+      return { projectId, removedCheckpoints: checkpoints.length }
+    })
+  }
+
+  async deleteCheckpoint(checkpointId: string): Promise<{ checkpointId: string; projectId: string }> {
+    const checkpoint = this.database.getCheckpoint(checkpointId)
+    if (!checkpoint) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到这个保存点')
+    return await this.withProjectOperation(checkpoint.projectId, async () => {
+      const project = this.database.getProject(checkpoint.projectId)
+      if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+      this.assertProjectOperation(project.id)
+      // Validation and deletion are one database transaction. A cleanup failure
+      // after this point must not invite a repeat of an already completed action.
+      this.database.deleteCheckpoint(checkpointId, this.operationOwnerId)
+      try { await this.git.deleteCheckpointRef(project.path, checkpointId) }
+      catch { /* A private orphan ref is safe and does not reappear in the timeline. */ }
+      return { checkpointId, projectId: project.id }
+    })
+  }
+
   async hasPendingChanges(projectId: string): Promise<boolean> {
     const project = this.database.getProject(projectId)
     if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
@@ -203,6 +239,7 @@ export class CheckpointEngine {
     const id = randomUUID()
     const createdAt = new Date().toISOString()
     const title = safeTitle(input.title)
+    this.assertProjectOperation(project.id)
     const hidden = await this.git.createHiddenCheckpoint(project.path, {
       id,
       title,
@@ -234,6 +271,7 @@ export class CheckpointEngine {
         ...(input.note ? { note: input.note.trim().slice(0, 2_000) } : {}),
         metadata: input.metadata ?? {}
       }
+      this.assertProjectOperation(project.id)
       this.database.insertCheckpoint(checkpoint)
       return checkpoint
     } catch (error) {
@@ -450,11 +488,12 @@ export class CheckpointEngine {
       )
       await this.persistManifest(recoveryDirectory, manifest)
       this.database.updateRestoreManifest(restoreId, manifest)
-      await this.moveUntrackedConflicts(project.path, recoveryDirectory, manifest)
+      await this.moveUntrackedConflicts(project.id, project.path, recoveryDirectory, manifest)
       this.assertProjectOperation(project.id)
       manifest.status = 'restoring'
       await this.persistManifest(recoveryDirectory, manifest)
       this.database.updateRestoreManifest(restoreId, manifest)
+      this.assertProjectOperation(project.id)
       await this.git.restoreWorktree(project.path, target.gitObjectId)
       this.assertProjectOperation(project.id)
       await this.git.verifyWorktreeAgainstCommit(project.path, target.gitObjectId)
@@ -463,12 +502,15 @@ export class CheckpointEngine {
       this.database.updateRestoreManifest(restoreId, manifest)
 
       const completedAt = new Date().toISOString()
-      this.database.updateRestore(restoreId, {
-        status: 'completed',
-        completedAt,
-        recoveryDirectory
+      this.database.transaction(() => {
+        this.assertProjectOperation(project.id)
+        this.database.updateRestore(restoreId, {
+          status: 'completed',
+          completedAt,
+          ...(recoveryDirectory ? { recoveryDirectory } : {})
+        })
+        this.database.setActiveCheckpoint(project.id, target.id)
       })
-      this.database.setActiveCheckpoint(project.id, target.id)
       return this.database.getRestore(restoreId) ?? {
         ...pending.record,
         status: 'completed',
@@ -539,26 +581,30 @@ export class CheckpointEngine {
       const restoredConflictPaths = new Set(uncapturedConflicts.map((entry) => entry.path))
       for (const entry of uncapturedConflicts) {
         const current = this.git.resolveProjectFile(project.path, entry.path)
-        await this.moveCurrentToUndoRecovery(current, this.safeJoin(undoRecoveryDirectory, `created-after-restore/${entry.path}`))
+        await this.moveCurrentToUndoRecovery(project.id, current, this.safeJoin(undoRecoveryDirectory, `created-after-restore/${entry.path}`))
         const savedOriginal = this.safeJoin(original.recoveryDirectory, entry.recoveryRelativePath)
         if (!(await this.git.fileExists(savedOriginal))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
         await this.verifyRecoveryEntry(savedOriginal, entry)
         await mkdir(dirname(current), { recursive: true })
+        this.assertProjectOperation(project.id)
         await rename(savedOriginal, current)
         await this.verifyRecoveryEntry(current, entry)
       }
       for (const path of manifest.createdByRestore) {
         if ([...restoredConflictPaths].some((conflict) => path === conflict || path.startsWith(`${conflict}/`) || conflict.startsWith(`${path}/`))) continue
         const current = this.git.resolveProjectFile(project.path, path)
-        await this.moveCurrentToUndoRecovery(current, this.safeJoin(undoRecoveryDirectory, `created-after-restore/${path}`))
+        await this.moveCurrentToUndoRecovery(project.id, current, this.safeJoin(undoRecoveryDirectory, `created-after-restore/${path}`))
       }
 
       manifest.status = 'undone'
       manifest.undoRecoveryDirectory = undoRecoveryDirectory
       await this.persistManifest(original.recoveryDirectory, manifest)
-      this.database.updateRestoreManifest(restoreId, manifest)
-      this.database.updateRestore(restoreId, { status: 'undone', undoneAt: new Date().toISOString() })
-      this.database.setActiveCheckpoint(original.projectId, originalPreview.activeCheckpointId)
+      this.database.transaction(() => {
+        this.assertProjectOperation(project.id)
+        this.database.updateRestoreManifest(restoreId, manifest)
+        this.database.updateRestore(restoreId, { status: 'undone', undoneAt: new Date().toISOString() })
+        this.database.setActiveCheckpoint(original.projectId, originalPreview.activeCheckpointId)
+      })
       return this.database.getRestore(restoreId) ?? { ...original, status: 'undone', undoneAt: new Date().toISOString() }
     } catch (error) {
       const undoManifest = undoAttemptRestoreId
@@ -615,7 +661,7 @@ export class CheckpointEngine {
     for (const path of addedPaths) {
       const source = this.git.resolveProjectFile(project.path, path)
       const destination = this.safeJoin(restore.recoveryDirectory, `shelf-added/${path}`)
-      await this.moveCurrentToUndoRecovery(source, destination)
+      await this.moveCurrentToUndoRecovery(project.id, source, destination)
     }
     const shelf: ShelvedChange = {
       id: shelfId,
@@ -626,6 +672,7 @@ export class CheckpointEngine {
       createdAt: new Date().toISOString(),
       status: 'active'
     }
+    this.assertProjectOperation(project.id)
     this.database.insertShelf(shelf)
     return shelf
   }
@@ -716,13 +763,14 @@ export class CheckpointEngine {
     }
   }
 
-  private async moveUntrackedConflicts(projectPath: string, recoveryDirectory: string, manifest: RestoreManifest): Promise<void> {
+  private async moveUntrackedConflicts(projectId: string, projectPath: string, recoveryDirectory: string, manifest: RestoreManifest): Promise<void> {
     for (const entry of manifest.conflicts) {
       const source = this.git.resolveProjectFile(projectPath, entry.path)
       if (!(await this.git.fileExists(source))) continue
       const destination = this.safeJoin(recoveryDirectory, entry.recoveryRelativePath)
       if (await this.git.fileExists(destination)) throw new VibeGitError('RECOVERY_PATH_CONFLICT', `恢复区路径已存在：${entry.path}`)
       await mkdir(dirname(destination), { recursive: true })
+      this.assertProjectOperation(projectId)
       await rename(source, destination)
       entry.moved = true
       await this.persistManifest(recoveryDirectory, manifest)
@@ -811,10 +859,11 @@ export class CheckpointEngine {
     }
   }
 
-  private async moveCurrentToUndoRecovery(source: string, destination: string): Promise<void> {
+  private async moveCurrentToUndoRecovery(projectId: string, source: string, destination: string): Promise<void> {
     if (!(await this.git.fileExists(source))) return
     if (await this.git.fileExists(destination)) throw new VibeGitError('UNDO_RECOVERY_CONFLICT', `撤销恢复区已存在：${destination}`)
     await mkdir(dirname(destination), { recursive: true })
+    this.assertProjectOperation(projectId)
     await rename(source, destination)
   }
 

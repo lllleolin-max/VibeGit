@@ -47,6 +47,16 @@ describe('Project registry and explicit working-tree checks', () => {
     expect((await sandbox.service.listProjects()).every((project) => project.worktreeStatus === 'unknown')).toBe(true)
   })
 
+  it('uses Git status without hashing a complete snapshot until the project has a checkpoint to compare', async () => {
+    sandbox = await createSandbox()
+    await sandbox.service.git.initialize(sandbox.projectPath)
+    await writeProjectFile(sandbox, 'untracked.txt', 'not protected yet\n')
+    const capture = vi.spyOn(sandbox.service.git, 'captureWorktreeTree').mockRejectedValue(new Error('No checkpoint comparison needs a snapshot'))
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    expect(await sandbox.service.refreshProject(project.id)).toMatchObject({ worktreeStatus: 'checked', hasUnsavedChanges: true, protectionEnabled: false })
+    expect(capture).not.toHaveBeenCalled()
+  })
+
   it.each(['create', 'connect'] as const)('returns the successful %s result without starting an unrelated worktree scan', async (operation) => {
     sandbox = await createSandbox()
     const project = await sandbox.service.addProject({ path: sandbox.projectPath })
@@ -77,9 +87,13 @@ describe('Project registry and explicit working-tree checks', () => {
     }
     const captured = await sandbox.service.git.captureWorktreeTree(project.path)
     const pending = deferred<typeof captured>()
-    const capture = vi.spyOn(sandbox.service.git, 'captureWorktreeTree').mockReturnValueOnce(pending.promise)
+    const entered = deferred<void>()
+    vi.spyOn(sandbox.service.git, 'captureWorktreeTree').mockImplementationOnce(() => {
+      entered.resolve()
+      return pending.promise
+    })
     const refresh = sandbox.service.refreshProject(project.id)
-    await vi.waitFor(() => expect(capture).toHaveBeenCalled())
+    await entered.promise
     const syncedAt = '2026-09-16T00:00:00.000Z'
     if (operation === 'connect') {
       vi.spyOn(sandbox.service.github, 'connect').mockImplementation(async () => {
@@ -102,9 +116,13 @@ describe('Project registry and explicit working-tree checks', () => {
     sandbox = await createSandbox()
     const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize })
     const pending = deferred<boolean>()
-    const repositoryCheck = vi.spyOn(sandbox.service.git, 'isRepository').mockReturnValueOnce(pending.promise)
+    const entered = deferred<void>()
+    vi.spyOn(sandbox.service.git, 'isRepository').mockImplementationOnce(() => {
+      entered.resolve()
+      return pending.promise
+    })
     const refresh = sandbox.service.refreshProject(project.id).catch((error: unknown) => error)
-    await vi.waitFor(() => expect(repositoryCheck).toHaveBeenCalled())
+    await entered.promise
     await sandbox.service.removeProject(project.id)
     pending.resolve(initialize)
     expect(await refresh).toMatchObject({ code: 'PROJECT_NOT_FOUND' })
@@ -119,9 +137,13 @@ describe('Project registry and explicit working-tree checks', () => {
     const checkpoint = sandbox.service.database.getLatestCheckpoint(project.id)!
     const tree = await sandbox.service.git.getCommitTree(project.path, checkpoint.gitObjectId)
     const pending = deferred<string>()
-    const getTree = vi.spyOn(sandbox.service.git, 'getCommitTree').mockReturnValueOnce(pending.promise)
+    const entered = deferred<void>()
+    vi.spyOn(sandbox.service.git, 'getCommitTree').mockImplementationOnce(() => {
+      entered.resolve()
+      return pending.promise
+    })
     const refresh = sandbox.service.refreshProject(project.id)
-    await vi.waitFor(() => expect(getTree).toHaveBeenCalled())
+    await entered.promise
     await writeProjectFile(sandbox, 'app.txt', 'newly saved content\n')
     const newer = await sandbox.service.createCheckpoint({ projectId: project.id, type: 'manual', title: 'newer' })
     pending.resolve(tree)

@@ -4,7 +4,7 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
 export default tseslint.config(
-  { ignores: ['dist', 'out', 'coverage', 'node_modules'] },
+  { ignores: ['dist/**', 'out/**', 'coverage/**', 'node_modules/**', 'release*/**', 'test-results/**', 'playwright-report/**'] },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -17,7 +17,7 @@ export default tseslint.config(
   },
   {
     rules: {
-      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }]
     }
   }

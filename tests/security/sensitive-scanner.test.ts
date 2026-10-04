@@ -119,6 +119,19 @@ describe('Sensitive file protection', () => {
     expect(scan.risks).toContainEqual(expect.objectContaining({ path: '.npmrc', kind: 'access_token' }))
   })
 
+  it('blocks npm basic-auth passwords while allowing harmless project npm settings', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, '.npmrc', 'node-linker=hoisted\nregistry=https://registry.npmjs.org/\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    expect((await sandbox.service.scanSensitiveFiles(project.id)).blocked).toBe(false)
+
+    // This short base64 value bypasses generic long-token matching, but npm
+    // still accepts it as an actual basic-auth password.
+    await writeProjectFile(sandbox, '.npmrc', '//registry.npmjs.org/:username=test-user\n//registry.npmjs.org/:_password=c2VjcmV0\n')
+    const scan = await sandbox.service.scanSensitiveFiles(project.id)
+    expect(scan.risks).toContainEqual(expect.objectContaining({ path: '.npmrc', kind: 'credentials', severity: 'blocked' }))
+  })
+
   it('blocks quoted JSON credentials, fine-grained GitHub tokens, and encrypted private keys', async () => {
     sandbox = await createSandbox()
     await writeProjectFile(sandbox, 'config.json', JSON.stringify({ api_key: fakeSecret(), access_token: fakeSecret() }))

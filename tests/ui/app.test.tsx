@@ -650,6 +650,65 @@ describe('VibeGit UI flow', () => {
     expect(api.undoRestore).toHaveBeenCalledWith('restore-1')
   })
 
+  it('refreshes the restored project when undo is used after switching projects', async () => {
+    const otherProject = { ...project, id: 'project-2', name: '第二个项目', path: 'C:/second-project' }
+    const refreshProject = vi.fn((id: string) => success(id === project.id ? project : otherProject))
+    const api = mockApi({
+      listProjects: vi.fn(() => success([project, otherProject])), refreshProject,
+      listCheckpoints: vi.fn((id) => success(id === project.id ? [checkpoint] : []))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(await screen.findByRole('button', { name: /邮箱验证码登录/ }))
+    await user.click(screen.getByRole('button', { name: '回到这个版本' }))
+    await user.click(await screen.findByRole('checkbox', { name: /我已了解/ }))
+    await user.click(screen.getByRole('button', { name: /确认并安全回退/ }))
+    await screen.findByText('已回到所选版本；回退前内容仍可找回')
+    await user.click(screen.getByRole('button', { name: '关闭详情' }))
+    await user.click(screen.getByRole('button', { name: /第二个项目/ }))
+    await waitFor(() => expect(refreshProject).toHaveBeenCalledWith(otherProject.id))
+    refreshProject.mockClear()
+    await user.click(screen.getByRole('button', { name: /撤销本次回退/ }))
+    await waitFor(() => expect(refreshProject).toHaveBeenCalledWith(project.id))
+    expect(refreshProject).not.toHaveBeenCalledWith(otherProject.id)
+    expect(screen.getByRole('heading', { name: '第二个项目' })).toBeInTheDocument()
+  })
+
+  it('keeps failed shelf reads distinct from an empty shelf and allows an explicit retry', async () => {
+    const shelf: ShelvedChange = { id: 'shelf-1', projectId: project.id, checkpointId: checkpoint.id, restoreId: 'restore-1', title: '稍后取回的修改', createdAt: new Date().toISOString(), status: 'active' }
+    const listShelves = vi.fn().mockRejectedValueOnce(new Error('暂存数据库忙')).mockImplementation(() => success([shelf]))
+    window.vibegit = mockApi({ listProjects: vi.fn(() => success([project])), listShelves })
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: '暂时收起' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('暂存记录暂时无法读取')
+    expect(screen.queryByText('还没有暂时收起的修改')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '重新读取暂存记录' }))
+    expect(await screen.findByText('稍后取回的修改')).toBeInTheDocument()
+    expect(listShelves).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps a successful shelf retrieval successful when the project list refresh fails', async () => {
+    const shelf: ShelvedChange = { id: 'shelf-1', projectId: project.id, checkpointId: checkpoint.id, restoreId: 'restore-1', title: '稍后取回的修改', createdAt: new Date().toISOString(), status: 'active' }
+    const api = mockApi({
+      listProjects: vi.fn().mockImplementationOnce(() => success([project])).mockRejectedValue(new Error('列表读取失败')),
+      listShelves: vi.fn().mockImplementationOnce(() => success([shelf])).mockImplementation(() => success([]))
+    })
+    window.vibegit = api
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click((await screen.findAllByRole('button', { name: /我的 AI 项目/ })).at(-1)!)
+    await user.click(screen.getByRole('button', { name: '暂时收起' }))
+    await user.click(await screen.findByRole('button', { name: '取回修改' }))
+    expect(await screen.findByText('已取回“稍后取回的修改”')).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent('修改操作已完成，但项目列表暂未刷新')
+    expect(screen.queryByRole('button', { name: '取回修改' })).not.toBeInTheDocument()
+    expect(api.retrieveShelf).toHaveBeenCalledTimes(1)
+  })
+
   it('opens checkpoint management without opening the diff, then renames and confirms deletion', async () => {
     const api = mockApi({
       listProjects: vi.fn(() => success([project])),

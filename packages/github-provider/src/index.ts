@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { chmod, lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises'
@@ -16,11 +15,11 @@ import { redactSecrets, VibeGitError } from '@vibegit/shared'
 import { VibeGitDatabase } from '@vibegit/database'
 import { GitEngine, type GitSshTransport, type TreeEntry } from '@vibegit/git-engine'
 import { CheckpointEngine } from '@vibegit/checkpoint-engine'
+import { runBoundedProcess } from './bounded-process'
 
 const DEFAULT_GH_TIMEOUT = 30_000
 const DEFAULT_GH_AUTH_TIMEOUT = 10 * 60_000
 const MAX_FILE_BYTES = 10 * 1024 * 1024
-const MAX_PROCESS_OUTPUT_BYTES = 4 * 1024 * 1024
 export const VIBEGIT_REMOTE_NAME = 'vibegit'
 const VIBEGIT_SSH_KEY_TITLE = 'VibeGit backup key'
 
@@ -97,25 +96,6 @@ function publicKeyHash(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex')
 }
 
-function boundedOutput(onLimit: () => void): { stdout: Buffer[]; stderr: Buffer[]; append: (target: Buffer[], chunk: Buffer) => void } {
-  let bytes = 0
-  let exceeded = false
-  return {
-    stdout: [],
-    stderr: [],
-    append(target, chunk) {
-      if (exceeded) return
-      bytes += chunk.length
-      if (bytes > MAX_PROCESS_OUTPUT_BYTES) {
-        exceeded = true
-        onLimit()
-        return
-      }
-      target.push(chunk)
-    }
-  }
-}
-
 async function managedKeyFileExists(path: string): Promise<boolean> {
   const info = await lstat(path).catch((error: NodeJS.ErrnoException) => {
     if (error.code === 'ENOENT') return undefined
@@ -128,6 +108,23 @@ async function managedKeyFileExists(path: string): Promise<boolean> {
     })
   }
   return true
+}
+
+async function writeManagedKeyMetadata(path: string, metadata: ManagedSshKeyMetadata): Promise<void> {
+  await managedKeyFileExists(path)
+  // Opening without truncation lets us verify the actual handle before writing,
+  // including on Windows where O_NOFOLLOW may not be available.
+  const file = await open(path, constants.O_WRONLY | constants.O_CREAT | (constants.O_NOFOLLOW ?? 0), 0o600)
+  try {
+    const [info, current] = await Promise.all([file.stat(), lstat(path)])
+    if (!info.isFile() || info.nlink !== 1 || !current.isFile() || current.ino !== info.ino || current.dev !== info.dev) {
+      throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 密钥记录不是独立的普通文件，已停止操作')
+    }
+    await file.truncate(0)
+    await file.writeFile(JSON.stringify(metadata), 'utf8')
+  } finally {
+    await file.close()
+  }
 }
 
 function risk(path: string, kind: SensitiveRisk['kind'], message: string, ignoreSuggestion?: string): SensitiveRisk {
@@ -195,8 +192,9 @@ function fileNameRisks(path: string, size: number): SensitiveRisk[] {
 function credentialConfigContentRisks(path: string, content: string): SensitiveRisk[] {
   if (basename(path).toLowerCase() !== '.npmrc') return []
   // A project-level .npmrc can contain harmless reproducibility settings such
-  // as node-linker. Only block it when it actually contains an npm credential.
-  return /(?:^|\n)\s*(?:[^\n]*:\s*)?_(?:authToken|auth)\s*=/i.test(content)
+  // as node-linker. Include legacy basic-auth passwords, whose base64 form may
+  // not match a generic token pattern and can be shorter than 16 characters.
+  return /(?:^|\n)\s*(?:[^\n]*:\s*)?_(?:authToken|auth|password)\s*=/i.test(content)
     ? [risk(path, 'credentials', 'npm 配置包含认证凭据', literalGitignoreRule(path))]
     : []
 }
@@ -429,72 +427,25 @@ export class GitHubProvider {
       }
       return result
     }
-    return await new Promise<GhResult>((resolvePromise, reject) => {
-      let settled = false
-      let child
-      try {
-        child = spawn(executable, args, {
-          cwd: resolve(cwd),
-          shell: false,
-          windowsHide: true,
-          env: environment,
-          stdio: ['ignore', 'pipe', 'pipe']
-        })
-      } catch (error) {
-        reject(new VibeGitError('SSH_TOOL_NOT_AVAILABLE', '无法创建 VibeGit 专用 SSH 密钥', {
-          remediation: '请安装系统 OpenSSH 组件后重试；不会上传任何项目文件。',
-          cause: error
-        }))
-        return
-      }
-      const { stdout, stderr, append } = boundedOutput(() => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        child.kill()
-        reject(new VibeGitError('SSH_OUTPUT_LIMIT', 'SSH 工具输出超过安全限制，已停止操作'))
-      })
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        child.kill()
-        reject(new VibeGitError('SSH_KEY_SETUP_TIMEOUT', '创建 SSH 密钥超时，已安全停止', {
-          remediation: '请检查系统 OpenSSH 组件后重试；不会上传任何项目文件。',
-          retryable: true
-        }))
-      }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => append(stdout, chunk))
-      child.stderr.on('data', (chunk: Buffer) => append(stderr, chunk))
-      child.on('error', (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(new VibeGitError('SSH_TOOL_NOT_AVAILABLE', '无法创建 VibeGit 专用 SSH 密钥', {
-          detail: redactSecrets(error.message),
-          remediation: '请安装系统 OpenSSH 组件后重试；不会上传任何项目文件。',
-          cause: error
-        }))
-      })
-      child.on('close', (code) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        const result: GhResult = {
-          exitCode: code ?? -1,
-          stdout: Buffer.concat(stdout).toString('utf8'),
-          stderr: Buffer.concat(stderr).toString('utf8')
-        }
-        if (result.exitCode !== 0) {
-          reject(new VibeGitError('SSH_KEY_SETUP_FAILED', '无法创建 VibeGit 专用 SSH 密钥', {
-            detail: redactSecrets(result.stderr.trim() || result.stdout.trim()),
-            remediation: '请检查系统 OpenSSH 组件和本机文件权限后重试；不会上传任何项目文件。',
-            retryable: true
-          }))
-          return
-        }
-        resolvePromise(result)
-      })
+    const result = await runBoundedProcess(executable, args, {
+      cwd, environment, timeoutMs,
+      unavailable: (error) => new VibeGitError('SSH_TOOL_NOT_AVAILABLE', '无法创建 VibeGit 专用 SSH 密钥', {
+        detail: redactSecrets(error.message),
+        remediation: '请安装系统 OpenSSH 组件后重试；不会上传任何项目文件。',
+        cause: error
+      }),
+      timeout: () => new VibeGitError('SSH_KEY_SETUP_TIMEOUT', 'SSH 工具执行超时，已停止操作', {
+        remediation: '请检查系统 OpenSSH 组件后重试；不会上传任何项目文件。', retryable: true
+      }),
+      outputLimit: () => new VibeGitError('SSH_OUTPUT_LIMIT', 'SSH 工具输出超过安全限制，已停止操作')
     })
+    if (result.exitCode !== 0) {
+      throw new VibeGitError('SSH_KEY_SETUP_FAILED', '无法创建 VibeGit 专用 SSH 密钥', {
+        detail: redactSecrets(result.stderr.trim() || result.stdout.trim()),
+        remediation: '请检查系统 OpenSSH 组件和本机文件权限后重试；不会上传任何项目文件。', retryable: true
+      })
+    }
+    return result
   }
 
   private async protectManagedKeyFiles(cwd: string, paths: ManagedSshKeyPaths): Promise<void> {
@@ -524,6 +475,7 @@ export class GitHubProvider {
   private async ensureManagedSshKey(cwd: string, username: string): Promise<{ created: boolean }> {
     const paths = this.managedKeyPaths(username)
     await mkdir(paths.directory, { recursive: true, mode: 0o700 })
+    await managedKeyFileExists(paths.metadata)
     const [hasPrivateKey, hasPublicKey] = await Promise.all([
       managedKeyFileExists(paths.privateKey), managedKeyFileExists(paths.publicKey)
     ])
@@ -544,7 +496,7 @@ export class GitHubProvider {
       const derived = await this.runSystem(cwd, this.sshKeygenExecutable, ['-y', '-P', '', '-f', paths.privateKey], 60_000)
       const publicKey = normalizedPublicKey(derived.stdout)
       if (!publicKey) throw new VibeGitError('SSH_KEY_INVALID', 'VibeGit SSH 密钥格式无效，已停止操作')
-      await writeFile(paths.publicKey, `${publicKey} vibegit-backup\n`, { encoding: 'utf8', mode: 0o644 })
+      await writeFile(paths.publicKey, `${publicKey} vibegit-backup\n`, { encoding: 'utf8', mode: 0o644, flag: 'wx' })
     }
 
     await this.protectManagedKeyFiles(cwd, paths)
@@ -574,7 +526,7 @@ export class GitHubProvider {
       publicKeySha256: publicKeyHash(publicKey),
       createdAt: new Date().toISOString()
     }
-    await writeFile(paths.metadata, JSON.stringify(metadata), { encoding: 'utf8', mode: 0o600 })
+    await writeManagedKeyMetadata(paths.metadata, metadata)
     return { created }
   }
 
@@ -593,6 +545,10 @@ export class GitHubProvider {
     return {
       sshCommand: [
         'ssh',
+        // User/system Host blocks may redirect HostName or launch ProxyCommand.
+        // Managed backups use only this explicit transport and application key.
+        '-F', 'none',
+        '-o', 'IdentityAgent=none',
         '-i', quote(normalize(paths.privateKey)),
         '-o', 'IdentitiesOnly=yes',
         '-o', 'BatchMode=yes',
@@ -616,72 +572,24 @@ export class GitHubProvider {
     const environment = this.ghEnvironment()
     if (this.executor) return await this.executor(cwd, [...args], options, environment)
     const timeoutMs = options.timeoutMs ?? this.timeoutMs
-    return await new Promise<GhResult>((resolvePromise, reject) => {
-      let settled = false
-      let child
-      try {
-        child = spawn(this.ghExecutable, args, {
-          cwd: resolve(cwd),
-          shell: false,
-          windowsHide: true,
-          env: environment,
-          stdio: ['ignore', 'pipe', 'pipe']
-        })
-      } catch (error) {
-        reject(new VibeGitError('GH_NOT_AVAILABLE', '未安装 GitHub CLI', {
-          remediation: '安装 gh 后即可使用 GitHub 私有备份；本地保存点不受影响。',
-          cause: error
-        }))
-        return
-      }
-      const { stdout, stderr, append } = boundedOutput(() => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        child.kill()
-        reject(new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止操作'))
-      })
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        child.kill()
-        reject(new VibeGitError('GH_COMMAND_TIMEOUT', 'GitHub 操作超时，已安全停止', {
-          retryable: true,
-          remediation: '检查网络连接后重试；本地保存点未受影响。'
-        }))
-      }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => append(stdout, chunk))
-      child.stderr.on('data', (chunk: Buffer) => append(stderr, chunk))
-      child.on('error', (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(new VibeGitError('GH_NOT_AVAILABLE', '未安装 GitHub CLI', {
-          detail: error.message,
-          remediation: '安装 gh 后即可使用 GitHub 私有备份；本地保存点不受影响。',
-          cause: error
-        }))
-      })
-      child.on('close', (code) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        const result = {
-          exitCode: code ?? -1,
-          stdout: Buffer.concat(stdout).toString('utf8'),
-          stderr: Buffer.concat(stderr).toString('utf8')
-        }
-        if (!(options.allowExitCodes ?? [0]).includes(result.exitCode)) {
-          reject(new VibeGitError('GH_COMMAND_FAILED', 'GitHub 未能完成操作', {
-            detail: redactSecrets(result.stderr.trim() || result.stdout.trim()),
-            remediation: '检查 GitHub 登录、网络和仓库权限后重试。',
-            retryable: true
-          }))
-          return
-        }
-        resolvePromise(result)
-      })
+    const result = await runBoundedProcess(this.ghExecutable, args, {
+      cwd, environment, timeoutMs,
+      unavailable: (error) => new VibeGitError('GH_NOT_AVAILABLE', '未安装 GitHub CLI', {
+        detail: redactSecrets(error.message),
+        remediation: '安装 gh 后即可使用 GitHub 私有备份；本地保存点不受影响。', cause: error
+      }),
+      timeout: () => new VibeGitError('GH_COMMAND_TIMEOUT', 'GitHub 操作超时，已停止操作', {
+        retryable: true, remediation: '检查网络连接后重试；本地保存点未受影响。'
+      }),
+      outputLimit: () => new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止操作')
     })
+    if (!(options.allowExitCodes ?? [0]).includes(result.exitCode)) {
+      throw new VibeGitError('GH_COMMAND_FAILED', 'GitHub 未能完成操作', {
+        detail: redactSecrets(result.stderr.trim() || result.stdout.trim()),
+        remediation: '检查 GitHub 登录、网络和仓库权限后重试。', retryable: true
+      })
+    }
+    return result
   }
 
   private async runGhInteractive(cwd: string, args: string[], timeoutMs = DEFAULT_GH_AUTH_TIMEOUT): Promise<GhResult> {
@@ -712,70 +620,18 @@ export class GitHubProvider {
       if (result.exitCode !== 0) throw authorizationFailed()
       return result
     }
-    return await new Promise<GhResult>((resolvePromise, reject) => {
-      let settled = false
-      let child
-      try {
-        child = spawn(this.ghExecutable, args, {
-          cwd: resolve(cwd),
-          shell: false,
-          windowsHide: true,
-          env: environment,
-          // All prompts are specified. Without a TTY gh emits its device URL
-          // instead of opening a browser; the UI exposes that fixed URL.
-          stdio: ['ignore', 'pipe', 'pipe']
-        })
-      } catch (error) {
-        reject(new VibeGitError('GH_NOT_AVAILABLE', '未安装 GitHub CLI', {
-          remediation: '安装 GitHub CLI 后，回到 VibeGit 再点击“连接 GitHub”。',
-          cause: error
-        }))
-        return
-      }
-      const { stdout, stderr, append } = boundedOutput(() => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        child.kill()
-        reject(new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止授权等待'))
-      })
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        child.kill()
-        reject(new VibeGitError('GH_AUTHORIZATION_TIMEOUT', '等待 GitHub 浏览器授权超时，已停止等待', {
-          remediation: '请重新点击“连接 GitHub”，在浏览器中完成授权后返回应用。',
-          retryable: true
-        }))
-      }, timeoutMs)
-      child.stdout.on('data', (chunk: Buffer) => { append(stdout, chunk); if (!settled) onOutput(chunk.toString('utf8')) })
-      child.stderr.on('data', (chunk: Buffer) => { append(stderr, chunk); if (!settled) onOutput(chunk.toString('utf8')) })
-      child.on('error', (error) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        reject(new VibeGitError('GH_NOT_AVAILABLE', '无法启动 GitHub 授权', {
-          detail: redactSecrets(error.message),
-          remediation: '确认 GitHub CLI 已安装后重试。',
-          cause: error
-        }))
-      })
-      child.on('close', (code) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        const result: GhResult = {
-          exitCode: code ?? -1,
-          stdout: Buffer.concat(stdout).toString('utf8'),
-          stderr: Buffer.concat(stderr).toString('utf8')
-        }
-        if (result.exitCode !== 0) {
-          reject(authorizationFailed())
-          return
-        }
-        resolvePromise(result)
-      })
+    const result = await runBoundedProcess(this.ghExecutable, args, {
+      cwd, environment, timeoutMs, onOutput,
+      unavailable: (error) => new VibeGitError('GH_NOT_AVAILABLE', '无法启动 GitHub 授权', {
+        detail: redactSecrets(error.message), remediation: '确认 GitHub CLI 已安装后重试。', cause: error
+      }),
+      timeout: () => new VibeGitError('GH_AUTHORIZATION_TIMEOUT', '等待 GitHub 浏览器授权超时，已停止等待', {
+        remediation: '请重新点击“连接 GitHub”，在浏览器中完成授权后返回应用。', retryable: true
+      }),
+      outputLimit: () => new VibeGitError('GH_OUTPUT_LIMIT', 'GitHub CLI 输出超过安全限制，已停止授权等待')
     })
+    if (result.exitCode !== 0) throw authorizationFailed()
+    return result
   }
 
   async status(cwd = process.cwd()): Promise<GitHubCliStatus> {

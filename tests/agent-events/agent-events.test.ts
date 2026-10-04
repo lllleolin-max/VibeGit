@@ -123,6 +123,26 @@ describe('Agent events', () => {
     expect(ended.checkpoint?.summary).not.toContain('Old session summary')
   })
 
+  it('saves a failed Hook turn immediately even when a summary is required for normal stops', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 1\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    await writeProjectFile(sandbox, 'app.ts', 'export const value = 2\n')
+    const failed = adaptHookEvent({
+      hook_event_name: 'StopFailure', cwd: sandbox.projectPath,
+      session_id: 'interrupted-session', turn_id: 'interrupted-turn'
+    }, 'codex')!
+
+    const result = await sandbox.service.handleAgentEvent(failed, { enforceSummary: true })
+    expect(result.summaryRequired).toBeUndefined()
+    expect(result.changed).toBe(true)
+    expect(result.checkpoint).toMatchObject({
+      projectId: project.id, type: 'post_agent',
+      metadata: { success: false, featureSummarySource: 'auto-generated' }
+    })
+    expect((await sandbox.service.handleAgentEvent(failed, { enforceSummary: true })).checkpoint?.id).toBe(result.checkpoint?.id)
+  })
+
   it('redacts queued summaries and retains them when checkpoint creation fails', async () => {
     sandbox = await createSandbox()
     await writeProjectFile(sandbox, 'app.ts', 'before\n')

@@ -103,6 +103,10 @@ test('built desktop app ignores an injected renderer URL and shows the local fir
     expect(await app.evaluate(({ app }) => app.getPath('userData'))).toBe(join(root, 'electron-profile'))
     const page = await app.firstWindow()
     await page.waitForFunction(() => document.documentElement.dataset.vibegitReady === 'true')
+    const invalidInvocation = await page.evaluate(async () => await window.vibegit.createCheckpoint({
+      projectId: 'unused', title: 'Forged internal checkpoint', type: 'pre_restore', agent: 'system'
+    }))
+    expect(invalidInvocation).toMatchObject({ ok: false, error: { code: 'INVALID_API_ARGUMENT' } })
     await expect(page.getByRole('heading', { name: '先选择一个正在用 AI 开发的文件夹' })).toBeVisible()
     await expect(page.getByRole('button', { name: /选择项目文件夹/ })).toBeEnabled()
     await page.screenshot({ path: resolve('test-results', 'vibegit-empty.png'), fullPage: true })

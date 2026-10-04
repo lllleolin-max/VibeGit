@@ -226,7 +226,9 @@ export class AgentEventService {
       const resolvedTaskText = taskText ?? started?.taskText
       const queuedSummary = await this.findSummary(project.path, input.agent, input.sessionId)
       const featureSummary = queuedSummary?.summary
-      if (!featureSummary && options.enforceSummary && !input.stopHookActive && await this.checkpoints.hasPendingChanges(project.id)) {
+      // A failed turn cannot reliably continue to submit a summary. Preserve its
+      // changes immediately, retaining the failure flag and explicit fallback.
+      if (!featureSummary && options.enforceSummary && input.success !== false && !input.stopHookActive && await this.checkpoints.hasPendingChanges(project.id)) {
         if (reservationId) this.database.deleteAgentEventReservation(reservationId)
         return {
           event: {

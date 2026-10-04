@@ -409,6 +409,75 @@ describe('checkpoint and safe restore', () => {
     }
   })
 
+  it('stops before moving a conflicting ignored file if the project lease is lost during preflight', async () => {
+    sandbox = await createSandbox('lease lost before recovery move')
+    await writeProjectFile(sandbox, 'secret.env', 'target placeholder\n')
+    const service = sandbox.service
+    const project = await service.addProject({ path: sandbox.projectPath })
+    const initial = (await service.initializeProtection(project.id)).checkpoint
+    await writeProjectFile(sandbox, '.gitignore', 'secret.env\n')
+    await writeProjectFile(sandbox, 'secret.env', 'original ignored content\n')
+    const preview = await service.prepareRestore(project.id, initial.id)
+    let leaseLost = false
+    const originalExists = service.git.fileExists.bind(service.git)
+    const originalHasLease = service.database.hasProjectOperation.bind(service.database)
+    const exists = vi.spyOn(service.git, 'fileExists').mockImplementation(async (path) => {
+      if (path.replaceAll('\\', '/').includes('/files/secret.env')) leaseLost = true
+      return await originalExists(path)
+    })
+    const lease = vi.spyOn(service.database, 'hasProjectOperation').mockImplementation((...args) =>
+      !leaseLost && originalHasLease(...args)
+    )
+    try {
+      await expect(service.executeRestore(preview.token)).rejects.toMatchObject({ code: 'RESTORE_FAILED' })
+      expect(leaseLost).toBe(true)
+      expect(await readFile(join(sandbox.projectPath, 'secret.env'), 'utf8')).toBe('original ignored content\n')
+      const failed = service.database.getRestoreByToken(preview.token)!.record
+      expect(failed).toMatchObject({ status: 'failed', errorCode: 'PROJECT_OPERATION_LEASE_LOST' })
+      await expect(readFile(join(failed.recoveryDirectory!, 'files', 'secret.env'))).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      exists.mockRestore()
+      lease.mockRestore()
+    }
+  })
+
+  it('rechecks the project lease after persisting the restoring manifest and before overwriting tracked files', async () => {
+    sandbox = await createSandbox('lease lost after restoring manifest')
+    await writeProjectFile(sandbox, 'app.txt', 'initial content\n')
+    const service = sandbox.service
+    const project = await service.addProject({ path: sandbox.projectPath })
+    const initial = (await service.initializeProtection(project.id)).checkpoint
+    await service.git.runner.run(sandbox.projectPath, ['add', '.'])
+    await writeProjectFile(sandbox, 'app.txt', 'current content must survive\n')
+    const preview = await service.prepareRestore(project.id, initial.id)
+    let leaseLost = false
+    const originalUpdate = service.database.updateRestoreManifest.bind(service.database)
+    const originalHasLease = service.database.hasProjectOperation.bind(service.database)
+    // This callback follows the asynchronous manifest write, after the earlier
+    // lease check. It injects expiration at the exact boundary without timers.
+    const manifestUpdate = vi.spyOn(service.database, 'updateRestoreManifest').mockImplementation((id, manifest) => {
+      originalUpdate(id, manifest)
+      if ((manifest as { status?: string }).status === 'restoring') leaseLost = true
+    })
+    const lease = vi.spyOn(service.database, 'hasProjectOperation').mockImplementation((...args) =>
+      !leaseLost && originalHasLease(...args)
+    )
+    const restore = vi.spyOn(service.git, 'restoreWorktree')
+    try {
+      await expect(service.executeRestore(preview.token)).rejects.toMatchObject({ code: 'RESTORE_FAILED' })
+      expect(leaseLost).toBe(true)
+      expect(restore).not.toHaveBeenCalled()
+      expect(await readFile(join(sandbox.projectPath, 'app.txt'), 'utf8')).toBe('current content must survive\n')
+      expect(service.database.getRestoreByToken(preview.token)!.record).toMatchObject({
+        status: 'failed', errorCode: 'PROJECT_OPERATION_LEASE_LOST'
+      })
+    } finally {
+      manifestUpdate.mockRestore()
+      lease.mockRestore()
+      restore.mockRestore()
+    }
+  })
+
   it('reconciles an executing restore after its crashed-process lease expires', async () => {
     sandbox = await createSandbox('expired operation lease')
     await writeProjectFile(sandbox, 'app.txt', 'one\n')
