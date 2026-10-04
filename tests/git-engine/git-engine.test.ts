@@ -162,10 +162,10 @@ describe('GitEngine', () => {
       await git.initialize(project)
       await writeFile(filterScript, [
         "const fs = require('node:fs');",
-        `fs.appendFileSync(${JSON.stringify(filterLog)}, 'clean\\n');`,
+        `fs.appendFileSync(${JSON.stringify(filterLog)}, process.argv[2] + '\\n');`,
         'process.stdout.write(fs.readFileSync(0));'
       ].join('\n'))
-      const filterCommand = `"${process.execPath.replaceAll('\\', '/')}" "${filterScript.replaceAll('\\', '/')}"`
+      const filterCommand = `"${process.execPath.replaceAll('\\', '/')}" "${filterScript.replaceAll('\\', '/')}" %f`
       await git.runner.run(project, ['config', 'filter.audit.clean', filterCommand])
       await writeFile(join(project, '.gitattributes'), '*.txt filter=audit\n')
       for (const name of ['unchanged.txt', 'assumed.txt', 'skipped.txt']) {
@@ -195,9 +195,12 @@ describe('GitEngine', () => {
         const entry = entries.find((item) => item.path === name)!
         expect((await git.readBlob(project, entry.objectId)).toString()).toBe(expected)
       }
-      // Only changed files should enter the content pipeline. read-tree based
-      // staging rehashed all three files, including the untouched one.
-      expect((await readFile(filterLog, 'utf8')).trim().split('\n')).toHaveLength(2)
+      // Git may run the clean filter more than once for a changed file. Assert
+      // which files enter the pipeline: the untouched file must never be read,
+      // while both hidden edits must be captured. Rebuilding through read-tree
+      // would also rehash unchanged.txt and fail this assertion.
+      const filteredPaths = (await readFile(filterLog, 'utf8')).trim().split('\n')
+      expect([...new Set(filteredPaths)].sort()).toEqual(['assumed.txt', 'skipped.txt'])
       expect(await readFile(join(project, '.git', 'index'))).toEqual(indexBefore)
     } finally {
       await rm(root, { recursive: true, force: true })
