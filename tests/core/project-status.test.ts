@@ -43,7 +43,7 @@ describe('Project registry and explicit working-tree checks', () => {
     expect(await sandbox.service.refreshProject(first.id)).toMatchObject({ worktreeStatus: 'checked', hasUnsavedChanges: false })
     await writeProjectFile(sandbox, 'app.txt', 'later edit\n')
     expect(await sandbox.service.refreshProject(first.id)).toMatchObject({ worktreeStatus: 'checked', hasUnsavedChanges: true })
-    expect(capture.mock.calls.every(([path]) => path === sandbox!.projectPath)).toBe(true)
+    expect(capture.mock.calls).toEqual([[first.path], [first.path]])
     expect((await sandbox.service.listProjects()).every((project) => project.worktreeStatus === 'unknown')).toBe(true)
   })
 

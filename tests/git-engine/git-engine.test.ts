@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rename, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rename, rm, utimes, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import childProcess from 'node:child_process'
 import { EventEmitter } from 'node:events'
@@ -313,7 +313,7 @@ describe('GitEngine', () => {
     process.env.GIT_DIR = join(other, '.git')
     process.env.GIT_INDEX_FILE = join(other, '.git', 'index')
     try {
-      expect(await git.getRepositoryRoot(root)).toBe(root)
+      expect(await git.getRepositoryRoot(root)).toBe(await realpath(root))
       await writeFile(join(root, 'local.txt'), 'kept in root\n', 'utf8')
       const captured = await git.captureWorktreeTree(root)
       expect((await git.listTree(root, captured.treeObjectId)).map((entry) => entry.path)).toContain('local.txt')
