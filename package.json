@@ -23,10 +23,14 @@
     "test:desktop": "playwright test --config playwright.config.ts",
     "test:cli-build": "node scripts/cli-build-smoke.mjs",
     "test:cli-e2e": "tsx scripts/cli-e2e.ts",
-    "check": "pnpm lint && pnpm build && pnpm test && pnpm test:cli-build && pnpm test:cli-e2e",
+    "check": "pnpm lint && pnpm build && pnpm test && pnpm test:cli-build && pnpm test:cli-e2e && pnpm test:plugins",
     "demo": "tsx scripts/demo.ts",
     "build:cli": "tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean",
-    "build": "tsc --noEmit && electron-vite build && tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean",
+    "build:mcp": "tsup --config tsup.mcp.config.ts && node scripts/generate-mcp-notices.mjs",
+    "build:plugins": "pnpm build:mcp && node scripts/build-plugins.mjs",
+    "test:plugins": "node --import tsx scripts/plugin-smoke.mjs",
+    "install:agent": "node scripts/install-agent.mjs",
+    "build": "tsc --noEmit && electron-vite build && tsup apps/cli/src/index.ts --format esm --platform node --target node22 --out-dir dist/cli --clean && pnpm build:plugins",
     "dist:win": "pnpm build && electron-builder --win nsis"
   },
   "build": {
@@ -72,6 +76,7 @@
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@playwright/test": "1.61.1",
     "@swc/core": "1.15.43",
     "@testing-library/jest-dom": "6.9.1",
@@ -96,6 +101,7 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.63.0",
     "vite": "7.3.6",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "zod": "4.6.7"
   }
 }

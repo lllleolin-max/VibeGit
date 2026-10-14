@@ -1,5 +1,19 @@
 # Final Validation
 
+## 2026-10-15：Agent 插件与真实 Codex 桌面验收
+
+新增共享本地 MCP 服务、Codex 0.2.1 插件及 Claude Code / DeepSeek Harness / WorkBuddy 0.2.0 适配包。`pnpm check` 全部通过：22 个测试文件、226 项通过、3 项平台条件跳过，以及 lint、类型检查、构建、CLI 验收和四宿主配置驱动的插件协议测试。
+
+独立 Codex 桌面窗口实际选择 `@VibeGit`，新 Logo 正常显示；状态、存档、历史、差异、重复保存去重共 6 次真实工具调用成功。桌面默认数据源回读匹配，Git HEAD、分支与暂存区保持不变。详情见[插件验证记录](AGENT_PLUGIN_VALIDATION.md)。
+
+Claude Code 官方清单校验通过；Claude Code、DeepSeek Harness 和 WorkBuddy 的真实宿主对话尚未验收，当前开放社区试用反馈。本次更新为源码和独立插件，已发布的桌面安装包仍为 v1.0.1。
+
+## 2026-10-05：GitHub 真实联测与远端 CI 补验
+
+源码提交 `95244e9` 的 [Windows/Linux Actions](https://github.com/lllleolin-max/VibeGit/actions/runs/37241520732) 全部通过；真实 GitHub 设备授权刷新、专用 SSH 公钥、Private 仓库创建/连接、内容与历史核验、敏感文件阻断、实际写入拒绝与重试，以及真实桌面按钮推送均通过。详情及验证边界见 [GitHub 真实联测报告](GITHUB_LIVE_VALIDATION_2026-10-05.md)。
+
+按既定量表，补验后 **98/100**。测试公钥已撤销，私有测试仓库已归档；两个本地临时目录因工具策略拒绝删除而保留。用户原有应用和数据未被覆盖升级，大项目容量验证缺口仍保留。
+
 ## 2026-10-05：工程自审修复（源码本地验收）
 
 按预先定义的 20 项控制量表，最终 **96/100**。详细扣分与逐项证据见 [工程自审报告](ENGINEERING_AUDIT_2026-10-05.md)。

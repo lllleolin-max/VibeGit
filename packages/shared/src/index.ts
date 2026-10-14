@@ -79,6 +79,7 @@ export interface FileDiff {
   previousPath?: string
   kind: ChangeKind
   patch: string
+  patchTruncated?: boolean
   binary: boolean
   insertions: number
   deletions: number
@@ -88,6 +89,8 @@ export interface CheckpointDiff {
   fromObjectId?: string
   toObjectId: string
   files: FileDiff[]
+  totalFiles?: number
+  truncated?: boolean
   insertions: number
   deletions: number
 }

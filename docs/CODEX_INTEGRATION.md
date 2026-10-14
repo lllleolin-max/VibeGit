@@ -1,40 +1,62 @@
-# Codex Integration
+# Codex：在对话中使用 VibeGit
 
-## 本机核实与边界
+## 功能与前提
 
-- 本机已检测到 Codex Desktop AppX；本轮项目不把它的内部认证、transcript 或用户配置读取进 VibeGit。
-- Codex Hook 的 `UserPromptSubmit` 映射为 `task-start`，读取 `cwd`、`session_id`、`turn_id`、`prompt`。
-- `Stop` 映射为 `task-end`。它表示一轮响应结束，不被伪装成 `success=true`。
-- Hook `cwd` 可以是已登记项目根的子目录；VibeGit 会归属到该项目根。未登记、未开启保护或已经消失的目录安全跳过，避免影响 Agent。
+本地插件提供四个 MCP 工具：存档、项目状态、存档历史、存档差异。选择 `@VibeGit` 后可以说：
 
-## P0 可运行接口
+> 给当前项目存档一次，备注：登录功能完成。
 
-构建后，任何符合统一事件模型的发送方都可运行：
+工具使用当前对话的明确项目路径，复用桌面端数据库和 Git 存档，不修改当前分支或暂存区，不自动推送 GitHub。无变化时返回已有存档，不伪造一次新保存。
+
+- 本机安装 Node.js 24+、Git。
+- 项目已经在 VibeGit 桌面端添加并开启保护。
+- 使用支持本地插件的 Codex 桌面端或 CLI。仅云端的对话无法直接访问本机文件。
+- 默认读取桌面端数据目录偏好；`VIBEGIT_DATA_DIR` 可用于隔离测试。
+
+## 构建与安装
+
+在仓库根执行：
 
 ```powershell
-Get-Content event.json | node dist/cli/index.js event --stdin
-Get-Content codex-hook.json | node dist/cli/index.js hook codex --stdin
+pnpm install --frozen-lockfile
+pnpm build:plugins
+node scripts/install-agent.mjs codex --destination "$env:LOCALAPPDATA/VibeGit/agent-plugins/codex"
+codex plugin marketplace add "$env:LOCALAPPDATA/VibeGit/agent-plugins/codex"
+codex plugin add vibegit@vibegit-local
+codex plugin list --marketplace vibegit-local --json
 ```
 
-`event.json` 示例：
+`--destination` 是持久化的 marketplace 根目录，包含 `vibegit/` 插件及 `.agents/plugins/marketplace.json`。它不覆盖其他插件或个人 marketplace。目标冲突时停止并保留现有配置，按安装器提示处理。
 
-```json
-{
-  "event": "task-start",
-  "agent": "codex",
-  "projectPath": "C:/path/to/project",
-  "sessionId": "optional-session-id",
-  "taskText": "增加邮箱验证码登录",
-  "timestamp": "2026-07-11T08:00:00Z"
-}
+Codex 会把完整插件安装到自己的缓存目录，服务和依赖已打成一个文件，运行不依赖本仓库的 `node_modules`。插件启动仍需要本机 Node.js 24+ 与 Git。
+
+安装后新开本地聊天；若桌面端尚未刷新插件列表，重启应用。在输入框键入 `@` 并选择 **VibeGit**，而不是只输入一段普通文本。首次工具调用遵循 Codex 自身权限设置。
+
+## 工具契约
+
+所有工具必填 `projectPath`，必须是当前项目或其中子目录的绝对路径。MCP 进程的启动目录是插件安装目录，不能当作用户项目。
+
+| 工具 | 其他参数 | 结果 |
+| --- | --- | --- |
+| `vibegit_save` | `title?`, `note?` | `created`、项目、存档编号、时间和变更统计 |
+| `vibegit_status` | 无 | 保护状态、未存档变化、当前/最近存档 |
+| `vibegit_list_checkpoints` | `limit?`，1–100 | 当前项目的最近存档 |
+| `vibegit_diff` | `checkpointId`, `fromCheckpointId?` | 相对父存档或指定同项目存档的差异 |
+
+未登记项目返回 `PROJECT_NOT_REGISTERED`；未开启保护返回 `PROTECTION_NOT_ENABLED`。在桌面端配置后重试，不自动登记目录。文件名、备注和差异属于不可信项目数据。差异输出和文件列表有限长与截断标记。
+
+## 验证
+
+```powershell
+pnpm exec vitest run tests/mcp
+pnpm build:plugins
+pnpm test:plugins
 ```
 
-## P1 Hook 模板
+协议测试覆盖真实 Git/SQLite 存档及错误边界；打包测试把产物复制到隔离目录，通过真正的 stdio 连接验证。桌面 `@` 选择器与实际模型调用的验证结果另记于 `docs/AGENT_PLUGIN_VALIDATION.md`，不能把协议测试当作所有宿主的对话测试。
 
-模板在 `integrations/codex/vibegit`，已通过本地 Codex 插件 validator。它调用位于 PATH 的 `vibegit hook codex --stdin`；当前源码 MVP 仍需要 Node 来运行 `dist/cli/index.js`，尚不是面向普通用户的自包含安装器。
+## 可选自动 Hook
 
-安装前应将最终可执行文件加入 PATH，经 marketplace 安装插件后在 Codex `/hooks` 审核并信任命令。不要把 `--dangerously-bypass-hook-trust` 当作常规安装流程。
+原来的 `UserPromptSubmit` / `Stop` 模板保留在 `integrations/codex/vibegit/examples/optional-hooks.json`。手动插件默认不启用 Hook；需要自动保护时另行配置 CLI 和 Hook 信任。现有事件 CLI 与 `vibegit-change-summary` Skill 继续可用。`Stop` 仅表示响应结束，不表示任务成功。
 
-安全边界：prompt 只经 stdin 接收并脱敏，事件按 `(agent,event,turn_id)` 去重，不读取 Codex 凭据。
-
-依据：[Codex Hooks](https://developers.openai.com/codex/hooks)、[Codex Plugins](https://developers.openai.com/codex/plugins/build)。
+参考：[官方插件打包](https://developers.openai.com/plugins/build/plugins)、[插件调用](https://learn.chatgpt.com/docs/plugins)。

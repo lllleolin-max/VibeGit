@@ -1,5 +1,7 @@
 # Engineering audit — 2026-10-05
 
+**后续补验：98/100。** 在源码提交 `95244e9` 上，远端 [Windows/Linux CI](https://github.com/lllleolin-max/VibeGit/actions/runs/37241520732) 全部通过，[GitHub 真实联测](GITHUB_LIVE_VALIDATION_2026-10-05.md)完成已有账号授权、专用 SSH 密钥、私有创建/连接、真实推送、内容与历史校验、异常恢复和桌面按钮验收。按下方既定量表，Credentials/verified remote transport 与 Reproducible automated checks 分别从 4 提升到 5，其余分数不变：20 + 20 + 18 + 20 + 20 = 98。仍保留大型未跟踪工作区/特殊 OS 管道边界，以及本轮源码尚未覆盖安装用户应用的两项扣分。以下 96 分表格保留为发布前本地验收历史。
+
 **结论：96/100，达到本次内部工程自审的 ≥95 目标。** 最终冻结源码的 19 个测试文件全部通过，199 项通过、3 项 Windows 平台条件跳过；桌面验收 3/3、构建、Lint、CLI 验收及依赖审计通过。分数代表下面公开的控制量表，不等同于覆盖率、外部认证或“没有任何缺陷”。本报告记录源码修复的本地验收结果；本轮未发布新安装包或升级用户桌面应用。提交后的远端检查结果见 [GitHub Actions](https://github.com/lllleolin-max/VibeGit/actions/workflows/quality.yml)。
 
 Scope: the VibeGit repository, starting from commit `4ae33d0`. This is an internal engineering rubric, not an external certification or a guarantee that no defects remain. The target is at least 95/100 after fixing findings and reviewing the final changes. Live user data and real GitHub uploads are outside the test fixture boundary.

@@ -33,7 +33,7 @@ import type {
 import { VibeGitError } from '@vibegit/shared'
 import { VibeGitDatabase } from '@vibegit/database'
 import { GitCommandRunner, GitEngine } from '@vibegit/git-engine'
-import { CheckpointEngine } from '@vibegit/checkpoint-engine'
+import { CheckpointEngine, type CheckpointSaveResult } from '@vibegit/checkpoint-engine'
 import { AgentEventService, type AgentEventResult } from '@vibegit/agent-events'
 import { GitHubProvider, VIBEGIT_REMOTE_NAME } from '@vibegit/github-provider'
 
@@ -531,6 +531,10 @@ export class VibeGitService {
       remediation: '文件发生变化后再创建保存点。'
     })
     return checkpoint
+  }
+
+  async createCheckpointOrExisting(input: CreateCheckpointInput): Promise<CheckpointSaveResult> {
+    return await this.checkpoints.createOrExisting(input)
   }
 
   listCheckpoints(projectId: string): Checkpoint[] {

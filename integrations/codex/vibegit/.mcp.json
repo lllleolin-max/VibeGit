@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "vibegit": {
+      "command": "node",
+      "args": ["server/server.mjs"],
+      "cwd": ".",
+      "env_vars": ["VIBEGIT_DATA_DIR", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_DATA_HOME"],
+      "startup_timeout_sec": 30,
+      "tool_timeout_sec": 180
+    }
+  }
+}

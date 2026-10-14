@@ -59,6 +59,13 @@ export interface GitRunnerOptions {
   audit?: (entry: CommandAuditEntry) => void
 }
 
+export interface DiffOptions {
+  /** Maximum file records and per-file patch commands. Omitted means all files. */
+  maxFiles?: number
+  /** Aggregate returned patch character budget. Exhaustion stops further patch commands. */
+  maxPatchCharacters?: number
+}
+
 const DEFAULT_TIMEOUT = 20_000
 const DEFAULT_MAX_OUTPUT = 32 * 1024 * 1024
 const INHERITED_GIT_ENVIRONMENT_KEYS = new Set([
@@ -724,28 +731,43 @@ export class GitEngine {
     })
   }
 
-  async getDiff(projectPath: string, fromObjectId: string | undefined, toObjectId: string): Promise<CheckpointDiff> {
+  async getDiff(projectPath: string, fromObjectId: string | undefined, toObjectId: string, options: DiffOptions = {}): Promise<CheckpointDiff> {
+    for (const limit of [options.maxFiles, options.maxPatchCharacters]) {
+      if (limit !== undefined && (!Number.isSafeInteger(limit) || limit < 0)) {
+        throw new VibeGitError('INVALID_DIFF_LIMIT', '差异显示上限必须是非负整数')
+      }
+    }
+    const bounded = options.maxFiles !== undefined || options.maxPatchCharacters !== undefined
     const from = fromObjectId ?? await this.getEmptyTree(projectPath)
     const summary = await this.summarizeDiff(projectPath, from, toObjectId)
     const files: FileDiff[] = []
-    for (const changed of summary) {
+    let remaining = options.maxPatchCharacters ?? Infinity
+    // Select records before producing patches: callers limiting output must not
+    // launch a Git process and retain a large patch for every changed file.
+    for (const changed of summary.slice(0, options.maxFiles)) {
       let patch = ''
-      if (!changed.binary) {
+      let patchTruncated = false
+      if (!changed.binary && remaining === 0) {
+        patchTruncated = true
+      } else if (!changed.binary) {
         const paths = changed.previousPath ? [changed.previousPath, changed.path] : [changed.path]
         const patchResult = await this.runner.run(
           projectPath,
           ['--literal-pathspecs', '-c', 'core.quotepath=false', 'diff', '--no-ext-diff', '--no-color', '-M', '--unified=3', from, toObjectId, '--', ...paths],
           { maxOutputBytes: 4 * 1024 * 1024 }
         )
-        patch = patchResult.stdout.length > 1_000_000
-          ? `${patchResult.stdout.slice(0, 1_000_000)}\n… Diff 过长，已截断显示 …\n`
-          : patchResult.stdout
+        const characterLimit = Math.min(1_000_000, remaining)
+        patchTruncated = patchResult.stdout.length > characterLimit
+        patch = patchResult.stdout.slice(0, characterLimit)
+        if (patchTruncated && !bounded) patch += '\n… Diff 过长，已截断显示 …\n'
+        remaining -= patch.length
       }
       files.push({
         path: changed.path,
         ...(changed.previousPath ? { previousPath: changed.previousPath } : {}),
         kind: changed.kind,
         patch,
+        ...(bounded ? { patchTruncated } : {}),
         binary: changed.binary,
         insertions: changed.insertions,
         deletions: changed.deletions
@@ -755,8 +777,9 @@ export class GitEngine {
       ...(fromObjectId ? { fromObjectId } : {}),
       toObjectId,
       files,
-      insertions: files.reduce((sum, file) => sum + file.insertions, 0),
-      deletions: files.reduce((sum, file) => sum + file.deletions, 0)
+      ...(bounded ? { totalFiles: summary.length, truncated: files.length < summary.length || files.some((file) => file.patchTruncated) } : {}),
+      insertions: summary.reduce((sum, file) => sum + file.insertions, 0),
+      deletions: summary.reduce((sum, file) => sum + file.deletions, 0)
     }
   }
 

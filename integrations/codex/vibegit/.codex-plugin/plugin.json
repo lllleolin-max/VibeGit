@@ -1,17 +1,23 @@
 {
   "name": "vibegit",
-  "version": "0.1.0",
-  "description": "Create local VibeGit protection points before and after Codex turns.",
+  "version": "0.2.1",
+  "description": "Save and inspect local project checkpoints through VibeGit.",
   "author": {
-    "name": "Local developer"
+    "name": "VibeGit"
   },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "VibeGit",
-    "shortDescription": "Protect every Codex change locally.",
-    "longDescription": "VibeGit records a local protection point before each Codex prompt and a feature save point when the turn stops. It only acts on projects already registered in the VibeGit desktop app.",
+    "shortDescription": "在对话中保存、查询和比较项目存档。",
+    "longDescription": "Save a real local checkpoint of the current protected project, inspect its history, and compare changes. Uses the same project registry and checkpoints as VibeGit desktop. Requires Node.js 24+ and Git on this computer.",
     "developerName": "VibeGit",
     "category": "Productivity",
-    "capabilities": [],
-    "defaultPrompt": "Show me how VibeGit protects this project."
+    "composerIcon": "./assets/vibegit-icon.png",
+    "composerIconDark": "./assets/vibegit-icon.png",
+    "logo": "./assets/vibegit-icon.png",
+    "logoDark": "./assets/vibegit-icon.png",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["给当前项目存档一次", "查看当前项目最近的存档"]
   }
 }

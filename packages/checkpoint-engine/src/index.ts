@@ -89,6 +89,11 @@ interface RestoreManifest {
   undoRecoveryDirectory?: string
 }
 
+export interface CheckpointSaveResult {
+  checkpoint: Checkpoint
+  created: boolean
+}
+
 export class CheckpointEngine {
   private readonly projectOperationTails = new Map<string, Promise<void>>()
   private readonly operationOwnerId = randomUUID()
@@ -166,6 +171,19 @@ export class CheckpointEngine {
 
   async create(input: CreateCheckpointInput): Promise<Checkpoint | undefined> {
     return await this.withProjectOperation(input.projectId, async () => await this.createLocked(input))
+  }
+
+  async createOrExisting(input: CreateCheckpointInput): Promise<CheckpointSaveResult> {
+    return await this.withProjectOperation(input.projectId, async () => {
+      const checkpoint = await this.createLocked(input)
+      if (checkpoint) return { checkpoint, created: true }
+      // Resolve a no-change result before releasing the lease. Another process
+      // can restore or save immediately afterwards and change the active record.
+      this.assertProjectOperation(input.projectId)
+      const existing = this.database.getActiveCheckpoint(input.projectId) ?? this.database.getLatestCheckpoint(input.projectId)
+      if (!existing) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到当前项目状态对应的保存点')
+      return { checkpoint: existing, created: false }
+    })
   }
 
   async removeProject(projectId: string): Promise<RemoveProjectResult> {

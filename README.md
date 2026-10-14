@@ -58,7 +58,22 @@ VibeGit 把 Git 的强大能力藏在更直白的操作背后：添加项目、�
 | 这版不对，能回去吗？ | 回退前先自动创建保险点，展示影响预览；完成后仍可撤销。 |
 | 我还没写完，先放一边可以吗？ | 将当前修改安全“暂时收起”，需要时再准确取回。 |
 | 不懂 Git 也能用吗？ | 可以。界面使用“项目”“保存点”“回到这个版本”等日常语言。 |
-| Codex / Claude Code 改的内容会记录吗？ | 统一 Agent 事件 CLI 可在任务前后创建保护点；已提供 Hook 模板。 |
+| 能直接让 Agent 存档吗？ | Codex 插件支持 `@VibeGit` 调用本地存档；Claude、DeepSeek Harness、WorkBuddy 共用 MCP 服务。自动 Hook 另行配置。 |
+
+## 在 Agent 对话中存档
+
+先在桌面端为项目开启保护，再构建并安装对应插件。插件与桌面共用存档，可保存、查看状态、列出历史、比较变化；本地保存不会自动推送 GitHub。
+
+| Agent / 插件版本 | 入口 | 当前验证状态 | 安装说明 |
+| --- | --- | --- | --- |
+| Codex · 0.2.1 | 选择 `@VibeGit`，输入“给当前项目存档一次” | 独立桌面窗口全流程通过，含品牌图标与重复保存去重 | [Codex](docs/CODEX_INTEGRATION.md) |
+| Claude Code · 0.2.0 | `/vibegit:save` | 官方清单校验、打包和协议测试通过；真实宿主会话待验证 | [Claude Code](docs/CLAUDE_CODE_INTEGRATION.md) |
+| DeepSeek Harness · 0.2.0 | `/vibegit-save` 或自然语言 | 适配、打包和协议测试通过；真实宿主会话待验证 | [DeepSeek Harness](docs/DEEPSEEK_HARNESS_INTEGRATION.md) |
+| WorkBuddy · 0.2.0 | 启用 MCP 与技能后自然语言调用 | 适配、打包和协议测试通过；真实宿主会话待验证 | [WorkBuddy](docs/WORKBUDDY_INTEGRATION.md) |
+
+此插件版需要本机 Node.js 24+ 和 Git；先运行 `pnpm build:plugins` 生成完整产物。各宿主的实际验收范围见 [插件验证记录](docs/AGENT_PLUGIN_VALIDATION.md)。
+
+欢迎在已配置好的宿主中按[社区验收步骤](docs/AGENT_PLUGIN_VALIDATION.md#社区宿主验收)试用，并通过 [Issues](https://github.com/lllleolin-max/VibeGit/issues)反馈宿主版本、操作步骤和实际结果。
 
 ## 一键同步到 GitHub 私有保险库
 
@@ -136,7 +151,9 @@ VibeGit 的默认立场是：**先保护，再操作。**
 
 已经实现并验证的核心闭环：本地版本保护、保存点与时间线、Diff、预览式恢复与撤销、暂时收起、GitHub Private 备份、Electron 桌面界面，以及统一的 Agent 事件 CLI。
 
-Codex 与 Claude Code 目前可通过复制指令完成源码部署；原生自动安装器仍在下一阶段。仓库已提供 Hook 模板，并清楚记录了验证范围与外部依赖。查看[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
+**2026-10-15 插件进展：** 仓库源码已包含本地 MCP 服务、四个 Agent 适配包和安装脚本。Codex 0.2.1 已通过真实桌面 `@VibeGit` 全流程验收；Claude Code、DeepSeek Harness、WorkBuddy 0.2.0 的宿主对话验收仍待完成。插件从源码单独构建安装，不包含在现有 v1.0.1 桌面安装包中。可选自动 Hook 模板继续保留，手动插件默认不启用。
+
+查看[插件验证记录](docs/AGENT_PLUGIN_VALIDATION.md)和[最终验证记录](docs/FINAL_VALIDATION.md)了解已执行的测试和当前限制。
 
 ## 支持与反馈
 

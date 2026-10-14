@@ -25,5 +25,5 @@
       "@vibegit/core": ["./packages/core/src/index.ts"]
     }
   },
-  "include": ["apps", "packages", "scripts", "tests", "electron.vite.config.ts", "vitest.config.ts", "eslint.config.js"]
+  "include": ["apps", "packages", "scripts", "tests", "electron.vite.config.ts", "vitest.config.ts", "tsup.mcp.config.ts", "eslint.config.js"]
 }
