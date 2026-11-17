@@ -8,6 +8,7 @@ import type {
   GitHubCliStatus,
   GitHubOnboardingResult,
   GitHubSyncResult,
+  Project,
   SensitiveRisk,
   SensitiveScanResult
 } from '@vibegit/shared'
@@ -84,6 +85,10 @@ function githubRepositorySlug(remoteUrl: string): string | undefined {
 
 function managedSshRemote(repository: string): string {
   return `ssh://git@ssh.github.com:443/${repository}.git`
+}
+
+function backupTargetChanged(): VibeGitError {
+  return new VibeGitError('GITHUB_REMOTE_CHANGED', '备份位置已切换，请重新开始备份', { retryable: true })
 }
 
 function normalizedPublicKey(value: string): string | undefined {
@@ -262,14 +267,15 @@ export class SensitiveFileScanner {
 
   async scan(projectPath: string, objectId?: string): Promise<SensitiveScanResult> {
     const tree = objectId ?? (await this.git.captureWorktreeTree(projectPath)).treeObjectId
-    const entries = await this.git.listTree(projectPath, tree)
+    const entries = await this.git.listTree(projectPath, tree, { blobSizes: true })
     const risks: SensitiveRisk[] = []
     let scannedFiles = 0
 
     for (const entry of entries) {
       if (entry.type !== 'blob') continue
       scannedFiles += 1
-      const size = await this.git.getBlobSize(projectPath, entry.objectId)
+      const size = entry.size
+      if (size === undefined) throw new VibeGitError('INVALID_GIT_BLOB_SIZE', 'Git 文件大小无效')
       risks.push(...fileNameRisks(entry.path, size))
       if (size <= MAX_FILE_BYTES) {
         const bytes = await this.git.readBlob(projectPath, entry.objectId)
@@ -731,9 +737,21 @@ export class GitHubProvider {
     await this.runGh(project.path, ['repo', 'create', fullName, '--private'], { timeoutMs: 60_000 })
     const remoteUrl = managedSshRemote(fullName)
     await this.verifyPrivateRepository(project.path, remoteUrl)
-    await this.git.setRemote(project.path, remoteUrl, VIBEGIT_REMOTE_NAME)
-    this.database.updateProjectRemote(projectId, remoteUrl)
+    await this.bindRemote(project, remoteUrl)
     return remoteUrl
+  }
+
+  private async bindRemote(project: Project, url: string, migrateFrom?: string): Promise<void> {
+    // Serialize only the local configuration change. Network and scanning work
+    // can proceed alongside saves, and a legacy migration cannot undo a reconnect.
+    await this.checkpoints.withProjectOperation(project.id, async () => {
+      if (migrateFrom !== undefined && (
+        this.database.getProject(project.id)?.githubRemoteUrl !== project.githubRemoteUrl ||
+        await this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME) !== migrateFrom
+      )) throw backupTargetChanged()
+      if (migrateFrom !== url) await this.git.setRemote(project.path, url, VIBEGIT_REMOTE_NAME)
+      this.database.updateProjectRemote(project.id, url)
+    })
   }
 
   private async verifyPrivateRepository(projectPath: string, remoteUrl: string): Promise<{ slug: string; status: GitHubCliStatus }> {
@@ -761,8 +779,7 @@ export class GitHubProvider {
     const verified = await this.verifyPrivateRepository(project.path, remoteUrl)
     this.requireManagedTransport(verified.status)
     const normalizedUrl = managedSshRemote(verified.slug)
-    await this.git.setRemote(project.path, normalizedUrl, VIBEGIT_REMOTE_NAME)
-    this.database.updateProjectRemote(projectId, normalizedUrl)
+    await this.bindRemote(project, normalizedUrl)
     return normalizedUrl
   }
 
@@ -812,6 +829,8 @@ export class GitHubProvider {
   async push(projectId: string): Promise<GitHubSyncResult> {
     const project = this.database.getProject(projectId)
     if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+    let expectedRemote = project.githubRemoteUrl
+    let previousSync = project.lastSyncedAt
     try {
       const savedUrl = await this.git.getRemoteUrl(project.path, VIBEGIT_REMOTE_NAME)
       if (!savedUrl) throw new VibeGitError('GITHUB_REMOTE_NOT_CONFIGURED', '尚未设置 GitHub 备份位置')
@@ -820,9 +839,13 @@ export class GitHubProvider {
       // Earlier versions persisted HTTPS and ordinary SSH URLs. Route those
       // through the same application key instead of ambient Git credentials.
       const remoteUrl = managedSshRemote(verified.slug)
-      if (savedUrl !== remoteUrl) {
-        await this.git.setRemote(project.path, remoteUrl, VIBEGIT_REMOTE_NAME)
-        this.database.updateProjectRemote(projectId, remoteUrl)
+      if (expectedRemote && githubRepositorySlug(expectedRemote)?.toLowerCase() !== verified.slug.toLowerCase()) throw backupTargetChanged()
+      if (savedUrl !== remoteUrl || expectedRemote !== remoteUrl) {
+        await this.bindRemote(project, remoteUrl, savedUrl)
+      }
+      if (expectedRemote !== remoteUrl) {
+        expectedRemote = remoteUrl
+        previousSync = undefined
       }
 
       const checkpoint = await this.checkpoints.create({
@@ -846,15 +869,16 @@ export class GitHubProvider {
       if (reverified.status.username !== verified.status.username) {
         throw new VibeGitError('GITHUB_ACCOUNT_CHANGED', '扫描期间 GitHub 账户已切换，已停止上传，请重试', { retryable: true })
       }
+      if (this.database.getProject(projectId)?.githubRemoteUrl !== remoteUrl) throw backupTargetChanged()
       // Push to the exact URL that was checked above. A mutable remote alias such
       // as `origin` could otherwise be changed between the visibility check and
       // the network operation.
       await this.git.pushCheckpoint(project.path, checkpoint.gitObjectId, remoteUrl, 'vibegit-backup', transport)
       const syncedAt = new Date().toISOString()
-      this.database.markCheckpointSynced(checkpoint.id, syncedAt)
+      this.database.markCheckpointSynced(checkpoint.id, syncedAt, remoteUrl)
       return { remoteUrl, checkpointId: checkpoint.id, syncedAt, branch: 'vibegit-backup' }
     } catch (error) {
-      this.database.updateProjectSyncFailure(projectId)
+      this.database.updateProjectSyncFailure(projectId, expectedRemote, previousSync)
       throw error
     }
   }

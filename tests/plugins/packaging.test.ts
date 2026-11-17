@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -16,7 +16,7 @@ const { installAgent } = await import(installModule) as {
 const temporaryRoots: string[] = []
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'vibegit-package-test-'))
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'vibegit-package-test-')))
   temporaryRoots.push(root)
   await mkdir(join(root, 'dist', 'mcp'), { recursive: true })
   await writeFile(join(root, 'dist', 'mcp', 'index.js'), 'process.stdin.resume()\n')

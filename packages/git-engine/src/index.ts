@@ -20,6 +20,7 @@ export interface CommandResult {
   stdout: string
   stderr: string
   stdoutBuffer: Buffer
+  stdoutTruncated?: boolean
   exitCode: number
   durationMs: number
 }
@@ -45,6 +46,8 @@ export interface CommandOptions {
   timeoutMs?: number
   allowExitCodes?: number[]
   maxOutputBytes?: number
+  /** Drain stdout after this prefix while still enforcing the command timeout and stderr limit. */
+  stdoutPrefixBytes?: number
 }
 
 export interface GitSshTransport {
@@ -179,6 +182,7 @@ export class GitCommandRunner {
       let terminationTimer: ReturnType<typeof setTimeout> | undefined
       let inputError: Error | undefined
       let stdoutBytes = 0
+      let stdoutTruncated = false
       let stderrBytes = 0
       const stdoutChunks: Buffer[] = []
       const stderrChunks: Buffer[] = []
@@ -263,8 +267,11 @@ export class GitCommandRunner {
 
       child.stdout.on('data', (chunk: Buffer) => {
         if (terminationError) return
-        stdoutBytes += chunk.length
-        if (stdoutBytes + stderrBytes <= maxOutputBytes) stdoutChunks.push(chunk)
+        const keep = options.stdoutPrefixBytes === undefined
+          ? chunk.length : Math.min(chunk.length, options.stdoutPrefixBytes - stdoutBytes)
+        if (keep < chunk.length) stdoutTruncated = true
+        stdoutBytes += keep
+        if (keep > 0 && stdoutBytes + stderrBytes <= maxOutputBytes) stdoutChunks.push(chunk.subarray(0, keep))
         failForSize()
       })
       child.stderr.on('data', (chunk: Buffer) => {
@@ -306,6 +313,7 @@ export class GitCommandRunner {
           stdout: stdoutBuffer.toString('utf8'),
           stderr: stderrBuffer.toString('utf8'),
           stdoutBuffer,
+          ...(stdoutTruncated ? { stdoutTruncated: true } : {}),
           exitCode: exitCode ?? -1,
           durationMs: Date.now() - startedAt
         }
@@ -351,6 +359,7 @@ export interface TreeEntry {
   type: 'blob' | 'tree' | 'commit'
   objectId: string
   path: string
+  size?: number
 }
 
 export interface CapturedTree {
@@ -751,13 +760,15 @@ export class GitEngine {
         patchTruncated = true
       } else if (!changed.binary) {
         const paths = changed.previousPath ? [changed.previousPath, changed.path] : [changed.path]
+        const characterLimit = Math.min(1_000_000, remaining)
         const patchResult = await this.runner.run(
           projectPath,
           ['--literal-pathspecs', '-c', 'core.quotepath=false', 'diff', '--no-ext-diff', '--no-color', '-M', '--unified=3', from, toObjectId, '--', ...paths],
-          { maxOutputBytes: 4 * 1024 * 1024 }
+          // A UTF-16 code unit needs at most three UTF-8 bytes. Read past the
+          // character boundary so a split multibyte sequence cannot affect the prefix.
+          { stdoutPrefixBytes: 3 * (characterLimit + 1), maxOutputBytes: 4 * 1024 * 1024 }
         )
-        const characterLimit = Math.min(1_000_000, remaining)
-        patchTruncated = patchResult.stdout.length > characterLimit
+        patchTruncated = patchResult.stdoutTruncated === true || patchResult.stdout.length > characterLimit
         patch = patchResult.stdout.slice(0, characterLimit)
         if (patchTruncated && !bounded) patch += '\n… Diff 过长，已截断显示 …\n'
         remaining -= patch.length
@@ -783,16 +794,18 @@ export class GitEngine {
     }
   }
 
-  async listTree(projectPath: string, objectId: string): Promise<TreeEntry[]> {
-    const output = (await this.runner.run(projectPath, ['ls-tree', '-r', '-z', '--full-tree', objectId])).stdoutBuffer.toString('utf8')
+  async listTree(projectPath: string, objectId: string, options: { blobSizes?: boolean } = {}): Promise<TreeEntry[]> {
+    const output = (await this.runner.run(projectPath, ['ls-tree', '-r', '-z', '--full-tree', ...(options.blobSizes ? ['-l'] : []), objectId])).stdoutBuffer.toString('utf8')
     return output.split('\0').filter(Boolean).map((entry) => {
       const tab = entry.indexOf('\t')
-      const metadata = entry.slice(0, tab).split(' ')
+      const metadata = entry.slice(0, tab).trim().split(/\s+/)
       const type = metadata[1]
       if (tab < 0 || metadata.length < 3 || (type !== 'blob' && type !== 'tree' && type !== 'commit')) {
         throw new VibeGitError('INVALID_GIT_TREE', '保存点包含无法识别的文件记录')
       }
-      return { mode: metadata[0] ?? '', type, objectId: metadata[2] ?? '', path: entry.slice(tab + 1) }
+      const size = options.blobSizes && type === 'blob' ? Number(metadata[3]) : undefined
+      if (size !== undefined && (!Number.isSafeInteger(size) || size < 0)) throw new VibeGitError('INVALID_GIT_BLOB_SIZE', 'Git 文件大小无效')
+      return { mode: metadata[0] ?? '', type, objectId: metadata[2] ?? '', path: entry.slice(tab + 1), ...(size !== undefined ? { size } : {}) }
     })
   }
 

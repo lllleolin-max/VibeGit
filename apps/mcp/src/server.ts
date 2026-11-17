@@ -155,7 +155,7 @@ export function createVibeGitMcpServer(options: VibeGitServiceOptions = {}): Vib
       project: refreshed,
       latestCheckpoint: latest ? checkpointSummary(latest) : null,
       activeCheckpoint: active ? checkpointSummary(active) : null,
-      checkpointCount: current.listCheckpoints(project.id).length
+      checkpointCount: current.database.countCheckpoints(project.id)
     }
   }))
 
@@ -195,10 +195,10 @@ export function createVibeGitMcpServer(options: VibeGitServiceOptions = {}): Vib
     annotations: readOnlyAnnotations
   }, async ({ projectPath, limit }) => await run(async (current) => {
     const project = await resolveProject(current, projectPath)
-    const checkpoints = current.listCheckpoints(project.id)
+    const { checkpoints, total } = current.database.listRecentCheckpoints(project.id, limit)
     return {
-      project: projectSummary(project), total: checkpoints.length,
-      checkpoints: checkpoints.slice(0, limit).map(checkpointSummary), hasMore: checkpoints.length > limit
+      project: projectSummary(project), total,
+      checkpoints: checkpoints.map(checkpointSummary), hasMore: total > checkpoints.length
     }
   }))
 

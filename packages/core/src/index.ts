@@ -427,9 +427,14 @@ export class VibeGitService {
       untrackedFiles: status?.untracked.length ?? 0,
       githubSyncStatus: 'not_configured'
     }
-    this.database.upsertProject(project)
-    if (input.initialize) return (await this.initializeProtection(project.id)).project
-    return project
+    const registered = this.database.transaction(() => {
+      const concurrent = this.database.getProjectByPath(projectPath)
+      if (concurrent) return concurrent
+      this.database.upsertProject(project)
+      return project
+    })
+    if (input.initialize && !registered.protectionEnabled) return (await this.initializeProtection(registered.id)).project
+    return registered.id === project.id ? registered : await this.refreshProject(registered.id)
   }
 
   async removeProject(projectId: string): Promise<RemoveProjectResult> {
@@ -437,26 +442,10 @@ export class VibeGitService {
   }
 
   async initializeProtection(projectId: string): Promise<{ project: Project; checkpoint: Checkpoint }> {
-    const project = this.requireProject(projectId)
-    await this.git.initialize(project.path)
-    await ensureProjectProtectionMarker(this.git, project.path)
-    const updated: Project = {
-      ...project,
-      isGitRepository: true,
-      protectionEnabled: project.protectionEnabled,
-      lastActivityAt: new Date().toISOString()
-    }
-    this.database.upsertProject(updated)
-    const existing = this.database.getLatestCheckpoint(projectId)
-    const checkpoint = existing ?? await this.checkpoints.create({
-      projectId,
-      type: 'initial',
-      title: '初始化项目',
-      agent: 'system',
-      summary: '已开启版本保护并保存当前项目状态',
-      allowEmpty: true
+    const checkpoint = await this.checkpoints.initializeProtection(projectId, async (projectPath) => {
+      await this.git.initialize(projectPath)
+      await ensureProjectProtectionMarker(this.git, projectPath)
     })
-    if (!checkpoint) throw new VibeGitError('INITIAL_CHECKPOINT_FAILED', '未能创建初始保存点')
     return { project: await this.refreshProject(projectId), checkpoint }
   }
 

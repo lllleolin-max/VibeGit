@@ -1,0 +1,19 @@
+diff --git a/lib/parse.js b/lib/parse.js
+index 29207512c60183b4bb9bf5112be3b9b5f4a9a9fd..0414bb89d99b53a488f05b90fbe879f4fabf9398 100644
+--- a/lib/parse.js
++++ b/lib/parse.js
+@@ -541,7 +541,13 @@ const parse = (input, options) => {
+     const body = input.slice(token.startIndex + 2, state.index);
+     const analysis = analyzeRepeatedExtglob(body, opts);
+ 
+-    if ((token.type === 'plus' || token.type === 'star') && analysis.risky) {
++    // GHSA-fc5q-39xc-vjpf: build tools only need literal repetitions and
++    // simple character ranges here. Route other single-branch repetitions
++    // through the parser's existing safe-output or literal fallback.
++    const repeated = token.type === 'plus' || token.type === 'star';
++    const complexSingle = repeated && splitTopLevel(body).length === 1
++      && !normalizeSimpleBranch(body) && !/^\[[\w -]+\]$/.test(body);
++    if (repeated && (analysis.risky || complexSingle)) {
+       const safeOutput = analysis.safeOutput
+         ? (token.output ? '' : ONE_CHAR) + (opts.capture ? `(${analysis.safeOutput})` : analysis.safeOutput)
+         : undefined;

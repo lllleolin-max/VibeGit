@@ -4,8 +4,15 @@ export class ServiceLifecycle<T extends { close(): void }> {
   private current: T | undefined
   private readonly active = new Map<T, number>()
   private readonly retired = new Set<T>()
+  private shutdown: Promise<void> | undefined
+  private resolveShutdown: (() => void) | undefined
 
   replace(next: T): void {
+    if (this.shutdown) {
+      this.retired.add(next)
+      this.closeRetired(next)
+      return
+    }
     const previous = this.current
     this.current = next
     if (previous && previous !== next) {
@@ -24,6 +31,7 @@ export class ServiceLifecycle<T extends { close(): void }> {
       if (remaining > 0) this.active.set(service, remaining)
       else this.active.delete(service)
       this.closeRetired(service)
+      if (this.active.size === 0) this.resolveShutdown?.()
     }
   }
 
@@ -31,10 +39,13 @@ export class ServiceLifecycle<T extends { close(): void }> {
     if (!this.active.has(service) && this.retired.delete(service)) service.close()
   }
 
-  close(): void {
+  close(): Promise<void> {
+    if (this.shutdown) return this.shutdown
+    this.shutdown = new Promise<void>((resolve) => { this.resolveShutdown = resolve })
     if (this.current) this.retired.add(this.current)
     this.current = undefined
-    for (const service of this.retired) service.close()
-    this.retired.clear()
+    for (const service of this.retired) this.closeRetired(service)
+    if (this.active.size === 0) this.resolveShutdown?.()
+    return this.shutdown
   }
 }

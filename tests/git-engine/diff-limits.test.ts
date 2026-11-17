@@ -65,6 +65,22 @@ describe('bounded checkpoint diffs', () => {
     }
   })
 
+  it('returns a readable prefix when a single text patch exceeds four MiB', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'vibegit-large-diff-'))
+    const git = new GitEngine()
+    try {
+      await git.initialize(root)
+      await writeFile(join(root, 'large.txt'), '字'.repeat(1_500_000) + '\n')
+      const tree = await git.captureWorktreeTree(root)
+      const diff = await git.getDiff(root, undefined, tree.treeObjectId, { maxPatchCharacters: 512 })
+      expect(diff).toMatchObject({ truncated: true, totalFiles: 1, insertions: 1, files: [{ patchTruncated: true }] })
+      expect(diff.files[0]?.patch).toHaveLength(512)
+      expect(diff.files[0]?.patch.endsWith('字')).toBe(true)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   it.each([-1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1])('rejects invalid limits (%s) before invoking Git', async (limit) => {
     const git = new GitEngine()
     const run = vi.spyOn(git.runner, 'run')

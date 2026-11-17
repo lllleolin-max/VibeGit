@@ -1,6 +1,6 @@
 import { access, link, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { TestSandbox } from '../helpers'
 import { cleanupSandbox, createSandbox, writeProjectFile } from '../helpers'
 
@@ -10,6 +10,17 @@ const fakeAssignment = (key: string) => `${key}=${fakeSecret()}\n`
 describe('Sensitive file protection', () => {
   let sandbox: TestSandbox | undefined
   afterEach(async () => { if (sandbox) await cleanupSandbox(sandbox); sandbox = undefined })
+
+  it('reads all blob sizes from one tree listing, including empty files', async () => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'empty.txt', '')
+    await writeProjectFile(sandbox, '文件 with spaces.txt', 'example\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const run = vi.spyOn(sandbox.service.git.runner, 'run')
+    expect(await sandbox.service.scanSensitiveFiles(project.id)).toMatchObject({ scannedFiles: 2, blocked: false })
+    expect(run.mock.calls.filter(([, args]) => args.includes('ls-tree') && args.includes('-l'))).toHaveLength(1)
+    expect(run.mock.calls.some(([, args]) => args[0] === 'cat-file' && args[1] === '-s')).toBe(false)
+  })
 
   it('blocks .env and token-like content without deleting files, then re-scans after ignore', async () => {
     sandbox = await createSandbox()

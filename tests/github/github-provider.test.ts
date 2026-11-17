@@ -277,9 +277,9 @@ setTimeout(() => process.exit(1), 750)
     const project = await sandbox.service.addProject({ path: sandbox.projectPath })
     const initialized = await sandbox.service.initializeProtection(project.id)
     const provider = await managedProvider(sandbox)
-    await provider.connect(project.id, 'https://github.com/test-user/failure-reporting.git')
+    const remote = await provider.connect(project.id, 'https://github.com/test-user/failure-reporting.git')
     const checkpoint = sandbox.service.listCheckpoints(initialized.project.id)[0]!
-    sandbox.service.database.markCheckpointSynced(checkpoint.id, new Date().toISOString())
+    sandbox.service.database.markCheckpointSynced(checkpoint.id, new Date().toISOString(), remote)
     const push = vi.spyOn(sandbox.service.git, 'pushCheckpoint').mockResolvedValue(undefined)
     const keyPath = testKeyPath(sandbox.dataDirectory)
     const publicBefore = await readFile(`${keyPath}.pub`, 'utf8')
@@ -289,7 +289,7 @@ setTimeout(() => process.exit(1), 750)
     expect(push).not.toHaveBeenCalled()
 
     await writeFile(`${keyPath}.pub`, publicBefore)
-    sandbox.service.database.markCheckpointSynced(checkpoint.id, new Date().toISOString())
+    sandbox.service.database.markCheckpointSynced(checkpoint.id, new Date().toISOString(), remote)
     vi.spyOn(provider.scanner, 'scan').mockRejectedValue(new Error('scan interrupted'))
     await expect(provider.push(project.id)).rejects.toThrow('scan interrupted')
     expect(sandbox.service.database.getProject(project.id)?.githubSyncStatus).toBe('failed')
@@ -510,6 +510,36 @@ setTimeout(() => process.exit(1), 750)
     await expect(provider.push(project.id)).rejects.toMatchObject({ code: 'GITHUB_REMOTE_NOT_CONFIGURED' })
     expect(sandbox.service.listCheckpoints(project.id).some((checkpoint) => checkpoint.type === 'pre_sync')).toBe(false)
     expect(await sandbox.service.git.getRemoteUrl(sandbox.projectPath, 'origin')).toBe(publicRemote)
+  })
+
+  it.each(['save', 'switch', 'switch then fail'] as const)('keeps the correct backup status after an in-flight %s', async (action) => {
+    sandbox = await createSandbox()
+    const { service, projectPath } = sandbox
+    const project = await service.addProject({ path: projectPath, initialize: true })
+    const provider = await managedProvider(sandbox)
+    const first = await provider.connect(project.id, 'https://github.com/test-user/first.git')
+    const push = vi.spyOn(service.git, 'pushCheckpoint').mockResolvedValue(undefined)
+    const previous = await provider.push(project.id)
+    expect(service.database.getProject(project.id)).toMatchObject({ githubRemoteUrl: first, githubSyncStatus: 'synced' })
+    let currentUrl = first
+    push.mockImplementationOnce(async () => {
+      if (action === 'save') {
+        await writeProjectFile(sandbox!, 'later.txt', 'saved during upload\n')
+        await service.createCheckpoint({ projectId: project.id, type: 'manual', title: 'later' })
+      } else {
+        currentUrl = await provider.connect(project.id, 'https://github.com/test-user/second.git')
+        if (action === 'switch then fail') throw new Error('old upload failed')
+      }
+    })
+    if (action === 'switch then fail') await expect(provider.push(project.id)).rejects.toThrow('old upload failed')
+    else await expect(provider.push(project.id)).resolves.toMatchObject({ remoteUrl: first })
+    const current = service.database.getProject(project.id)!
+    expect(current).toMatchObject({ githubRemoteUrl: currentUrl, githubSyncStatus: 'pending' })
+    if (action === 'save') expect(current.lastSyncedAt).toBeDefined()
+    else {
+      expect(current.lastSyncedAt).toBeUndefined()
+      expect(service.database.getCheckpoint(previous.checkpointId)?.githubSyncStatus).toBe('pending')
+    }
   })
 
   it('pushes a scanned checkpoint to the non-force backup branch', async () => {

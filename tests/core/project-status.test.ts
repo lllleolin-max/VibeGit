@@ -1,6 +1,7 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { VibeGitService } from '@vibegit/core'
 import { cleanupSandbox, createSandbox, writeProjectFile, type TestSandbox } from '../helpers'
 
 function deferred<T>() {
@@ -30,6 +31,34 @@ describe('Project registry and explicit working-tree checks', () => {
     expect(projects.map((project) => project.id).sort()).toEqual([first.id, second.id].sort())
     expect(projects.every((project) => project.worktreeStatus === 'unknown')).toBe(true)
     expect(run).not.toHaveBeenCalled()
+  })
+
+  it('registers and initializes the same folder once across two services', async () => {
+    sandbox = await createSandbox()
+    const other = new VibeGitService({ dataDirectory: sandbox.dataDirectory })
+    try {
+      const input = { path: sandbox.projectPath, initialize: true }
+      const [first, second] = await Promise.all([sandbox.service.addProject(input), other.addProject(input)])
+      expect(second).toMatchObject({ id: first.id, protectionEnabled: true })
+      expect(sandbox.service.listCheckpoints(first.id)).toMatchObject([{ type: 'initial' }])
+    } finally {
+      other.close()
+    }
+  })
+
+  it('reenables protection with the existing checkpoint after the Git directory becomes available again', async () => {
+    sandbox = await createSandbox()
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const initial = sandbox.service.database.getLatestCheckpoint(project.id)!
+    const gitDirectory = join(project.path, '.git')
+    const temporarilyMoved = join(sandbox.root, 'offline-git')
+    await rename(gitDirectory, temporarilyMoved)
+    expect((await sandbox.service.refreshProject(project.id)).protectionEnabled).toBe(false)
+    await rename(temporarilyMoved, gitDirectory)
+    expect(await sandbox.service.initializeProtection(project.id)).toMatchObject({
+      project: { protectionEnabled: true }, checkpoint: { id: initial.id }
+    })
+    expect(sandbox.service.database.countCheckpoints(project.id)).toBe(1)
   })
 
   it('checks only the selected working tree and distinguishes a later edit from a saved checkpoint', async () => {
@@ -103,7 +132,7 @@ describe('Project registry and explicit working-tree checks', () => {
       })
       await sandbox.service.connectRemote({ projectId: project.id, remoteUrl })
     } else {
-      sandbox.service.database.markCheckpointSynced(checkpoint.id, syncedAt)
+      sandbox.service.database.markCheckpointSynced(checkpoint.id, syncedAt, remoteUrl)
     }
     pending.resolve(captured)
     const expected = { githubRemoteUrl: remoteUrl, githubSyncStatus: operation === 'connect' ? 'pending' : 'synced' }

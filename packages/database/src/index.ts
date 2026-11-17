@@ -452,6 +452,10 @@ export class VibeGitDatabase {
     return rows.map(mapProject)
   }
 
+  enableProjectProtection(projectId: string): void {
+    this.db.prepare('UPDATE projects SET is_git_repository = 1, protection_enabled = 1 WHERE id = ?').run(projectId)
+  }
+
   deleteProject(projectId: string, operationOwnerId?: string): void {
     this.transaction(() => {
       if (operationOwnerId && !this.hasProjectOperation(projectId, operationOwnerId)) {
@@ -474,11 +478,12 @@ export class VibeGitDatabase {
       const active = this.getCheckpoint(row.active_checkpoint_id)
       if (active?.projectId === projectId) return active
     }
-    const fallback = this.listCheckpoints(projectId).find((checkpoint) =>
-      checkpoint.type !== 'pre_restore' &&
-      checkpoint.type !== 'pre_sync' &&
-      checkpoint.metadata.purpose !== 'shelf'
-    )
+    const fallbackRow = this.db.prepare(`
+      SELECT * FROM checkpoints WHERE project_id = ? AND type NOT IN ('pre_restore', 'pre_sync')
+        AND (CASE WHEN json_valid(metadata_json) THEN json_extract(metadata_json, '$.purpose') END) IS NOT 'shelf'
+      ORDER BY created_at DESC, rowid DESC LIMIT 1
+    `).get(projectId) as CheckpointRow | undefined
+    const fallback = fallbackRow ? mapCheckpoint(fallbackRow) : undefined
     if (fallback) this.setActiveCheckpoint(projectId, fallback.id)
     return fallback
   }
@@ -597,6 +602,21 @@ export class VibeGitDatabase {
     return rows.map(mapCheckpoint)
   }
 
+  countCheckpoints(projectId: string): number {
+    const row = this.db.prepare('SELECT COUNT(*) AS total FROM checkpoints WHERE project_id = ?').get(projectId) as { total: number }
+    return row.total
+  }
+
+  listRecentCheckpoints(projectId: string, limit: number): { checkpoints: Checkpoint[]; total: number } {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new VibeGitError('INVALID_CHECKPOINT_LIMIT', '存档数量上限必须是正整数')
+    // Read the page and count from a single SQLite snapshot while other clients save.
+    const rows = this.db.prepare(`
+      SELECT *, (SELECT COUNT(*) FROM checkpoints WHERE project_id = ?) AS total
+      FROM checkpoints WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?
+    `).all(projectId, projectId, limit) as unknown as (CheckpointRow & { total: number })[]
+    return { checkpoints: rows.map(mapCheckpoint), total: rows[0]?.total ?? 0 }
+  }
+
   renameCheckpoint(checkpointId: string, title: string): Checkpoint {
     return this.transaction(() => {
       const checkpoint = this.getCheckpoint(checkpointId)
@@ -609,8 +629,7 @@ export class VibeGitDatabase {
   prepareCheckpointDeletion(checkpointId: string): Checkpoint {
     const checkpoint = this.getCheckpoint(checkpointId)
     if (!checkpoint) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到这个保存点')
-    const checkpointCount = this.db.prepare('SELECT COUNT(*) AS count FROM checkpoints WHERE project_id = ?').get(checkpoint.projectId) as { count: number }
-    if (checkpointCount.count <= 1) {
+    if (this.countCheckpoints(checkpoint.projectId) <= 1) {
       throw new VibeGitError('CHECKPOINT_DELETE_LAST_FORBIDDEN', '至少保留一个保存点，才能继续安全恢复项目', {
         remediation: '请保留这个最后的保存点，或在创建新的保存点后再删除旧记录。'
       })
@@ -647,24 +666,41 @@ export class VibeGitDatabase {
     })
   }
 
-  markCheckpointSynced(checkpointId: string, syncedAt: string): void {
+  markCheckpointSynced(checkpointId: string, syncedAt: string, remoteUrl: string): void {
     this.transaction(() => {
       const checkpoint = this.getCheckpoint(checkpointId)
       if (!checkpoint) throw new VibeGitError('CHECKPOINT_NOT_FOUND', '找不到要标记的保存点')
+      if (this.getProject(checkpoint.projectId)?.githubRemoteUrl !== remoteUrl) return
       this.db.prepare(`UPDATE checkpoints SET github_sync_status = 'synced' WHERE id = ?`).run(checkpointId)
       this.db.prepare(`
-        UPDATE projects SET github_sync_status = 'synced', last_synced_at = ?, last_synced_checkpoint_id = ?
+        UPDATE projects SET github_sync_status = CASE WHEN (
+          SELECT id FROM checkpoints WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1
+        ) = ? THEN 'synced' ELSE 'pending' END, last_synced_at = ?, last_synced_checkpoint_id = ?
         WHERE id = ?
-      `).run(syncedAt, checkpointId, checkpoint.projectId)
+      `).run(checkpoint.projectId, checkpointId, syncedAt, checkpointId, checkpoint.projectId)
     })
   }
 
   updateProjectRemote(projectId: string, remoteUrl: string): void {
-    this.db.prepare(`UPDATE projects SET github_remote_url = ?, github_sync_status = 'pending' WHERE id = ?`).run(remoteUrl, projectId)
+    this.transaction(() => {
+      const project = this.getProject(projectId)
+      if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+      const changed = this.db.prepare(`
+        UPDATE projects SET github_remote_url = ?, github_sync_status = 'pending',
+          last_synced_at = NULL, last_synced_checkpoint_id = NULL
+        WHERE id = ? AND github_remote_url IS NOT ?
+      `).run(remoteUrl, projectId, remoteUrl)
+      if (changed.changes) {
+        this.db.prepare(`UPDATE checkpoints SET github_sync_status = 'pending' WHERE project_id = ?`).run(projectId)
+      }
+    })
   }
 
-  updateProjectSyncFailure(projectId: string): void {
-    this.db.prepare(`UPDATE projects SET github_sync_status = 'failed' WHERE id = ?`).run(projectId)
+  updateProjectSyncFailure(projectId: string, remoteUrl: string | undefined, lastSyncedAt: string | undefined): void {
+    this.db.prepare(`
+      UPDATE projects SET github_sync_status = 'failed'
+      WHERE id = ? AND github_remote_url = ? AND last_synced_at IS ?
+    `).run(projectId, remoteUrl ?? null, lastSyncedAt ?? null)
   }
 
   insertAgentEvent(event: AgentEventRecord): void {

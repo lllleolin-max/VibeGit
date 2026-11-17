@@ -1,4 +1,4 @@
-import { mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { VibeGitService } from '@vibegit/core'
@@ -289,12 +289,47 @@ describe('checkpoint and safe restore', () => {
 
     const preview = await sandbox.service.prepareRestore(project.id, initial.id)
     expect(preview.conflictPaths).toContain('config')
+    for (const path of ['config/public.txt', 'config/secret.env']) {
+      expect(preview.files).toContainEqual(expect.objectContaining({ path, action: 'move_to_recovery' }))
+    }
     const restored = await sandbox.service.executeRestore(preview.token)
     expect(normalizedLines(await readFile(join(sandbox.projectPath, 'config'), 'utf8'))).toBe('target file\n')
 
     await sandbox.service.undoRestore(restored.id)
     expect(normalizedLines(await readFile(join(sandbox.projectPath, 'config/public.txt'), 'utf8'))).toBe('public original\n')
     expect(normalizedLines(await readFile(join(sandbox.projectPath, 'config/secret.env'), 'utf8'))).toBe('ignored original\n')
+  })
+
+  it.each([false, true])('brings back empty directories after undo, including when regular files are present (%s)', async (withFile) => {
+    sandbox = await createSandbox()
+    await writeProjectFile(sandbox, 'config', 'as a file\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const target = sandbox.service.database.getActiveCheckpoint(project.id)!
+    await rm(join(project.path, 'config'))
+    if (withFile) await writeProjectFile(sandbox, 'config/public.txt', 'original\n')
+    await mkdir(join(project.path, 'config', 'empty'), { recursive: true })
+    const preview = await sandbox.service.prepareRestore(project.id, target.id)
+    expect(preview.conflictPaths).toContain('config')
+    const restored = await sandbox.service.executeRestore(preview.token)
+    expect(normalizedLines(await readFile(join(project.path, 'config'), 'utf8'))).toBe('as a file\n')
+    await sandbox.service.undoRestore(restored.id)
+    expect(await readdir(join(project.path, 'config', 'empty'))).toEqual([])
+    if (withFile) expect(normalizedLines(await readFile(join(project.path, 'config', 'public.txt'), 'utf8'))).toBe('original\n')
+  })
+
+  it('restores an empty checkpoint when the user index still tracks a file', async () => {
+    sandbox = await createSandbox()
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const empty = sandbox.service.database.getActiveCheckpoint(project.id)!
+    await writeProjectFile(sandbox, 'staged.txt', 'staged original\n')
+    await sandbox.service.git.runner.run(project.path, ['add', '--', 'staged.txt'])
+    const before = await sandbox.service.git.getRepositoryStateFingerprint(project.path)
+    const preview = await sandbox.service.prepareRestore(project.id, empty.id)
+    const restored = await sandbox.service.executeRestore(preview.token)
+    await expect(readFile(join(project.path, 'staged.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(await sandbox.service.git.getRepositoryStateFingerprint(project.path)).toEqual(before)
+    await sandbox.service.undoRestore(restored.id)
+    expect(normalizedLines(await readFile(join(project.path, 'staged.txt'), 'utf8'))).toBe('staged original\n')
   })
 
   it('stops when files change after the restore preview', async () => {

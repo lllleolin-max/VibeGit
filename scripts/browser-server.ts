@@ -193,14 +193,22 @@ async function handleStatic(request: IncomingMessage, response: ServerResponse):
   }
 }
 
+const pending = new Set<Promise<void>>()
+let closing = false
 const server = createServer((request, response) => {
+  if (closing) {
+    response.writeHead(503, { connection: 'close' }).end()
+    return
+  }
   // Reject foreign Host headers as well as Origin, including DNS rebinding.
   if (request.headers.host !== new URL(origin).host) {
     sendJson(response, 403, fail(new VibeGitError('BROWSER_REQUEST_REJECTED', '已拒绝非本机界面的请求')))
     return
   }
-  void (request.url?.startsWith('/api/') ? handleApi(request, response) : handleStatic(request, response))
+  const handling = (request.url?.startsWith('/api/') ? handleApi(request, response) : handleStatic(request, response))
     .catch((error: unknown) => sendJson(response, 500, fail(error)))
+  pending.add(handling)
+  void handling.finally(() => pending.delete(handling))
 })
 
 await new Promise<void>((resolveReady, reject) => {
@@ -222,15 +230,14 @@ if (!process.argv.includes('--no-open')) {
   }
 }
 
-let closing = false
 function close(): void {
   if (closing) return
   closing = true
   server.close(() => {
-    service.close()
-    process.exit(0)
+    // A disconnected client can leave a save or restore running after its
+    // socket closes. Let it finish before releasing the database.
+    void Promise.allSettled([...pending]).then(() => service.close())
   })
-  setTimeout(() => process.exit(0), 2_000).unref()
 }
 
 process.once('SIGINT', close)

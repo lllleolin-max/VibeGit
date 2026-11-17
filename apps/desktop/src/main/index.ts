@@ -270,6 +270,13 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
 })
 
-app.on('before-quit', () => {
-  services.close()
+let shutdown: Promise<void> | undefined
+let servicesClosed = false
+app.on('before-quit', (event) => {
+  if (servicesClosed) return
+  event.preventDefault()
+  shutdown ??= services.close().then(() => {
+    servicesClosed = true
+    app.quit()
+  })
 })

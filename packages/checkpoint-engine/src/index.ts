@@ -1,9 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash, randomUUID, type Hash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import {
   lstat,
   mkdir,
   mkdtemp,
-  readFile,
   readlink,
   readdir,
   rename,
@@ -44,24 +44,58 @@ function isPathInside(root: string, target: string): boolean {
 }
 
 function normalizeForVolume(value: string): string {
-  const normalized = value.replaceAll('\\', '/').replace(/\/$/, '')
+  const normalized = (sep === '\\' ? value.replaceAll('\\', '/') : value).replace(/\/$/, '')
   return process.platform === 'win32' || process.platform === 'darwin' ? normalized.normalize('NFC').toLocaleLowerCase('en-US') : normalized
 }
 
-function pathCollides(untracked: readonly string[], targetPath: string): string | undefined {
-  const normalized = normalizeForVolume(targetPath)
-  return untracked.find((candidate) => {
-    const item = normalizeForVolume(candidate)
-    return item === normalized || item.startsWith(`${normalized}/`) || normalized.startsWith(`${item}/`)
-  })
+function pathOrAncestor(paths: ReadonlyMap<string, string>, path: string): string | undefined {
+  let key = normalizeForVolume(path)
+  while (key) {
+    const match = paths.get(key)
+    if (match !== undefined) return match
+    const slash = key.lastIndexOf('/')
+    if (slash < 0) break
+    key = key.slice(0, slash)
+  }
+  return undefined
 }
 
-function conflictMovePath(conflict: string, targetPath: string): string {
-  const normalizedConflict = conflict.replaceAll('\\', '/').replace(/\/$/, '')
-  const normalizedTarget = targetPath.replaceAll('\\', '/').replace(/\/$/, '')
-  const compareConflict = process.platform === 'win32' || process.platform === 'darwin' ? normalizedConflict.toLocaleLowerCase('en-US') : normalizedConflict
-  const compareTarget = process.platform === 'win32' || process.platform === 'darwin' ? normalizedTarget.toLocaleLowerCase('en-US') : normalizedTarget
-  return compareConflict.startsWith(`${compareTarget}/`) ? normalizedTarget : normalizedConflict
+async function restoreConflictPaths(
+  git: GitEngine,
+  projectPath: string,
+  untracked: readonly string[],
+  targets: readonly TreeEntry[],
+  changedPaths: ReadonlySet<string>
+): Promise<string[]> {
+  const files = new Map<string, string>()
+  const directories = new Map<string, string>()
+  for (const path of untracked) {
+    files.set(normalizeForVolume(path), path)
+    let slash = path.lastIndexOf('/')
+    while (slash >= 0) {
+      const directory = path.slice(0, slash)
+      const key = normalizeForVolume(directory)
+      if (directories.has(key)) break
+      directories.set(key, directory)
+      slash = directory.lastIndexOf('/')
+    }
+  }
+  const moves = new Set<string>()
+  for (const entry of targets) {
+    const move = pathOrAncestor(files, entry.path) ?? directories.get(normalizeForVolume(entry.path))
+    if (move) moves.add(move)
+    else if (entry.type === 'blob' && changedPaths.has(entry.path)) {
+      // Git's untracked-file list omits empty directories. A restore can still
+      // replace one with a file, so preserve the actual directory for undo.
+      try {
+        if ((await lstat(git.resolveProjectFile(projectPath, entry.path))).isDirectory()) moves.add(entry.path)
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (code !== 'ENOENT' && code !== 'ENOTDIR') throw error
+      }
+    }
+  }
+  return [...moves].sort()
 }
 
 interface RecoveryEntry {
@@ -103,7 +137,7 @@ export class CheckpointEngine {
     readonly git: GitEngine
   ) {}
 
-  private async withProjectOperation<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
+  async withProjectOperation<T>(projectId: string, operation: () => Promise<T>): Promise<T> {
     if (!this.database.getProject(projectId)) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
     const previous = this.projectOperationTails.get(projectId) ?? Promise.resolve()
     let release!: () => void
@@ -171,6 +205,29 @@ export class CheckpointEngine {
 
   async create(input: CreateCheckpointInput): Promise<Checkpoint | undefined> {
     return await this.withProjectOperation(input.projectId, async () => await this.createLocked(input))
+  }
+
+  async initializeProtection(projectId: string, prepareRepository: (path: string) => Promise<void>): Promise<Checkpoint> {
+    return await this.withProjectOperation(projectId, async () => {
+      const project = this.database.getProject(projectId)
+      if (!project) throw new VibeGitError('PROJECT_NOT_FOUND', '找不到这个项目')
+      await prepareRepository(project.path)
+      const existing = this.database.getLatestCheckpoint(projectId)
+      if (existing) {
+        await this.git.verifyCommit(project.path, existing.gitObjectId)
+        const active = this.database.getActiveCheckpoint(projectId)
+        if (active && active.id !== existing.id) await this.git.verifyCommit(project.path, active.gitObjectId)
+        this.assertProjectOperation(projectId)
+        this.database.enableProjectProtection(projectId)
+        return existing
+      }
+      const checkpoint = await this.createLocked({
+        projectId, type: 'initial', title: '初始化项目', agent: 'system',
+        summary: '已开启版本保护并保存当前项目状态', allowEmpty: true
+      })
+      if (!checkpoint) throw new VibeGitError('INITIAL_CHECKPOINT_FAILED', '未能创建初始保存点')
+      return checkpoint
+    })
   }
 
   async createOrExisting(input: CreateCheckpointInput): Promise<CheckpointSaveResult> {
@@ -345,6 +402,7 @@ export class CheckpointEngine {
       this.git.getRepositoryStateFingerprint(project.path)
     ])
     const allUntracked = [...untracked.ordinary, ...untracked.ignored]
+    const ignored = new Set(untracked.ignored)
     const targetPaths = new Set(targetEntries.map((entry) => entry.path))
     const trackedPaths = new Set(tracked)
     const files: RestoreImpactFile[] = []
@@ -352,20 +410,20 @@ export class CheckpointEngine {
     const changedPaths = new Set(changes.flatMap((change) =>
       change.previousPath ? [change.previousPath, change.path] : [change.path]
     ))
+    const conflictPaths = await restoreConflictPaths(this.git, project.path, allUntracked, targetEntries, changedPaths)
+    const moves = new Map(conflictPaths.map((path) => [normalizeForVolume(path), path]))
     for (const path of changedPaths) {
       const absolute = this.git.resolveProjectFile(project.path, path)
       const exists = await this.git.fileExists(absolute)
-      const conflict = pathCollides(allUntracked, path)
-      if (targetPaths.has(path)) {
-        if (conflict) {
-          files.push({ path, action: 'move_to_recovery', reason: `当前未保存文件“${conflict}”会先移入恢复区` })
-        } else {
-          files.push({
-            path,
-            action: exists ? 'overwrite' : 'add',
-            reason: exists ? '用所选保存点中的版本覆盖' : '从所选保存点恢复这个文件'
-          })
-        }
+      const conflict = pathOrAncestor(moves, path)
+      if (conflict) {
+        files.push({ path, action: 'move_to_recovery', reason: `当前路径“${conflict}”会先移入恢复区` })
+      } else if (targetPaths.has(path)) {
+        files.push({
+          path,
+          action: exists ? 'overwrite' : 'add',
+          reason: exists ? '用所选保存点中的版本覆盖' : '从所选保存点恢复这个文件'
+        })
       } else if (trackedPaths.has(path)) {
         files.push({ path, action: 'remove', reason: '所选保存点中不存在；当前内容已存入保险点' })
       } else {
@@ -373,14 +431,11 @@ export class CheckpointEngine {
       }
     }
     for (const path of allUntracked) {
-      if (!files.some((file) => file.path === path || file.reason.includes(`“${path}”`))) {
-        files.push({ path, action: 'preserve', reason: untracked.ignored.includes(path) ? '本地忽略文件会原样保留' : '当前新增且未保存的文件会原样保留' })
-      }
+      if (changedPaths.has(path)) continue
+      const move = pathOrAncestor(moves, path)
+      if (move) files.push({ path, action: 'move_to_recovery', reason: `当前路径“${move}”会先移入恢复区` })
+      else files.push({ path, action: 'preserve', reason: ignored.has(path) ? '本地忽略文件会原样保留' : '当前新增且未保存的文件会原样保留' })
     }
-    const conflictPaths = [...new Set(targetEntries.flatMap((entry) => {
-      const conflict = pathCollides(allUntracked, entry.path)
-      return conflict ? [conflictMovePath(conflict, entry.path)] : []
-    }))].sort()
 
     const createdAt = new Date().toISOString()
     const preview: RestorePreview = {
@@ -472,27 +527,26 @@ export class CheckpointEngine {
       // a recovery location the next app instance can surface.
       this.database.updateRestore(restoreId, { status: 'executing', recoveryDirectory })
       stagingDirectory = await mkdtemp(join(tmpdir(), 'vibegit-restore-'))
-      const [targetEntries, insuranceEntries, tracked, untracked] = await Promise.all([
+      const [targetEntries, insuranceEntries, tracked] = await Promise.all([
         this.git.listTree(project.path, target.gitObjectId),
         this.git.listTree(project.path, insurance.gitObjectId),
-        this.git.listTrackedFiles(project.path),
-        this.git.listUntrackedFiles(project.path)
+        this.git.listTrackedFiles(project.path)
       ])
-      const allUntracked = [...untracked.ordinary, ...untracked.ignored]
-      const currentConflictPaths = [...new Set(targetEntries.flatMap((entry) => {
-        const conflict = pathCollides(allUntracked, entry.path)
-        return conflict ? [conflictMovePath(conflict, entry.path)] : []
-      }))].sort()
-      if (JSON.stringify(currentConflictPaths) !== JSON.stringify([...pending.preview.conflictPaths].sort())) {
-        throw new VibeGitError('RESTORE_STATE_CHANGED', '预览后出现了新的文件冲突，已停止回退', {
-          remediation: '重新打开回退预览，确认最新影响。'
-        })
-      }
       await this.stageTarget(project.path, target.gitObjectId, stagingDirectory, targetEntries)
       // Materializing the target may take time. Editors and Agents can keep
       // writing meanwhile, so validate once more immediately before any move or
       // overwrite; a stale preview must never silently win.
       await this.assertRestorePreviewIsCurrent(project.id, project.path, pending.preview)
+      const untracked = await this.git.listUntrackedFiles(project.path)
+      const currentConflictPaths = await restoreConflictPaths(
+        this.git, project.path, [...untracked.ordinary, ...untracked.ignored],
+        targetEntries, new Set(pending.preview.files.map((file) => file.path))
+      )
+      if (JSON.stringify(currentConflictPaths) !== JSON.stringify([...pending.preview.conflictPaths].sort())) {
+        throw new VibeGitError('RESTORE_STATE_CHANGED', '预览后的文件冲突已变化，已停止回退', {
+          remediation: '重新打开回退预览，确认最新影响。'
+        })
+      }
       this.assertProjectOperation(project.id)
       const manifest = await this.createRestoreManifest(
         restoreId,
@@ -502,7 +556,7 @@ export class CheckpointEngine {
         targetEntries,
         insuranceEntries,
         tracked,
-        allUntracked
+        currentConflictPaths
       )
       await this.persistManifest(recoveryDirectory, manifest)
       this.database.updateRestoreManifest(restoreId, manifest)
@@ -512,7 +566,9 @@ export class CheckpointEngine {
       await this.persistManifest(recoveryDirectory, manifest)
       this.database.updateRestoreManifest(restoreId, manifest)
       this.assertProjectOperation(project.id)
-      await this.git.restoreWorktree(project.path, target.gitObjectId)
+      // An empty target and empty user index have no Git paths to apply.
+      // Git rejects "." in that case; recovery files still need normal undo.
+      if (targetEntries.length || tracked.length) await this.git.restoreWorktree(project.path, target.gitObjectId)
       this.assertProjectOperation(project.id)
       await this.git.verifyWorktreeAgainstCommit(project.path, target.gitObjectId)
       manifest.status = 'applied'
@@ -576,10 +632,9 @@ export class CheckpointEngine {
     let undoMutationCompleted = false
     let undoAttemptRestoreId: string | undefined
     try {
-      const uncapturedConflicts = manifest.conflicts.filter((entry) => !entry.capturedInInsurance)
-      // Ignored originals exist only in recovery storage. Validate every one
-      // before restoring the insurance checkpoint, so missing/corrupt content
-      // leaves the current worktree untouched and the undo remains retryable.
+      // Git omits empty directories even when every file was captured. Older
+      // manifests can mark such directories as captured; use the original tree.
+      const uncapturedConflicts = manifest.conflicts.filter((entry) => entry.kind === 'directory' || !entry.capturedInInsurance)
       for (const entry of uncapturedConflicts) {
         const savedOriginal = this.safeJoin(original.recoveryDirectory, entry.recoveryRelativePath)
         if (!(await this.git.fileExists(savedOriginal))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
@@ -742,24 +797,21 @@ export class CheckpointEngine {
     targetEntries: TreeEntry[],
     insuranceEntries: TreeEntry[],
     tracked: string[],
-    untracked: string[]
+    conflictPaths: string[]
   ): Promise<RestoreManifest> {
     const insurancePaths = new Set(insuranceEntries.map((entry) => entry.path))
+    const insuranceBlobs = new Set(insuranceEntries.filter((entry) => entry.type === 'blob').map((entry) => entry.path))
     const trackedPaths = new Set(tracked)
     const createdByRestore = targetEntries
       .filter((entry) => entry.type === 'blob' && !insurancePaths.has(entry.path) && !trackedPaths.has(entry.path))
       .map((entry) => entry.path)
-    const conflictMap = new Map<string, RecoveryEntry>()
-    for (const entry of targetEntries) {
-      const conflict = pathCollides(untracked, entry.path)
-      if (!conflict) continue
-      const movePath = conflictMovePath(conflict, entry.path)
-      if (conflictMap.has(movePath)) continue
+    const conflicts: RecoveryEntry[] = []
+    for (const movePath of conflictPaths) {
       const source = this.git.resolveProjectFile(projectPath, movePath)
       if (!(await this.git.fileExists(source))) continue
       const description = await this.describeRecoveryEntry(source)
-      const capturedInInsurance = await this.isFullyCapturedInInsurance(source, movePath, insuranceEntries)
-      conflictMap.set(movePath, {
+      const capturedInInsurance = description.kind !== 'directory' && insuranceBlobs.has(movePath)
+      conflicts.push({
         path: movePath,
         recoveryRelativePath: `files/${movePath}`,
         ...description,
@@ -776,7 +828,7 @@ export class CheckpointEngine {
       targetObjectId: target.gitObjectId,
       insuranceObjectId: insurance.gitObjectId,
       createdByRestore,
-      conflicts: [...conflictMap.values()],
+      conflicts,
       status: 'planned'
     }
   }
@@ -814,30 +866,26 @@ export class CheckpointEngine {
           hash.update(relativePath)
           if (childInfo.isDirectory()) await visit(child)
           else if (childInfo.isSymbolicLink()) hash.update(await readlink(child))
-          else { const bytes = await readFile(child); size += bytes.byteLength; hash.update(bytes) }
+          else if (childInfo.isFile()) size += await this.hashRecoveryFile(child, hash)
+          else throw new VibeGitError('UNSUPPORTED_RECOVERY_ENTRY', '恢复区只支持普通文件、目录或符号链接')
         }
       }
       await visit(path)
       return { kind: 'directory', size, sha256: hash.digest('hex'), mode: info.mode }
     }
-    const bytes = await readFile(path)
-    return { kind: 'file', size: bytes.byteLength, sha256: createHash('sha256').update(bytes).digest('hex'), mode: info.mode }
+    if (!info.isFile()) throw new VibeGitError('UNSUPPORTED_RECOVERY_ENTRY', '恢复区只支持普通文件、目录或符号链接')
+    const hash = createHash('sha256')
+    const size = await this.hashRecoveryFile(path, hash)
+    return { kind: 'file', size, sha256: hash.digest('hex'), mode: info.mode }
   }
 
-  private async isFullyCapturedInInsurance(source: string, projectRelativePath: string, insuranceEntries: TreeEntry[]): Promise<boolean> {
-    const insurancePaths = new Set(insuranceEntries.filter((entry) => entry.type === 'blob').map((entry) => entry.path))
-    const leaves: string[] = []
-    const visit = async (absolute: string, relativePath: string): Promise<void> => {
-      const info = await lstat(absolute)
-      if (!info.isDirectory() || info.isSymbolicLink()) {
-        leaves.push(relativePath.replaceAll('\\', '/'))
-        return
-      }
-      const names = await readdir(absolute)
-      for (const name of names) await visit(resolve(absolute, name), `${relativePath}/${name}`)
+  private async hashRecoveryFile(path: string, hash: Hash): Promise<number> {
+    let size = 0
+    for await (const chunk of createReadStream(path) as AsyncIterable<Buffer>) {
+      size += chunk.length
+      hash.update(chunk)
     }
-    await visit(source, projectRelativePath.replaceAll('\\', '/').replace(/\/$/, ''))
-    return leaves.length > 0 && leaves.every((path) => insurancePaths.has(path))
+    return size
   }
 
   private async verifyRecoveryEntry(path: string, expected: RecoveryEntry): Promise<void> {

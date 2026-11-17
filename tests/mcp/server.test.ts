@@ -186,6 +186,16 @@ describe('VibeGit MCP tools over real MCP transports', () => {
     expect(await sandbox.service.checkpoints.hasPendingChanges(project.id)).toBe(false)
   })
 
+  it('reports zero checkpoints for a registered project without protection', async () => {
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath })
+    const { client } = await connect()
+    const args = { projectPath: project.path }
+    expect(body(await client.callTool({ name: 'vibegit_status', arguments: args }))).toMatchObject({ checkpointCount: 0 })
+    expect(body(await client.callTool({ name: 'vibegit_list_checkpoints', arguments: args }))).toMatchObject({
+      total: 0, checkpoints: [], hasMore: false
+    })
+  })
+
   it('shows changes relative to the active checkpoint and returns bounded newest-first history', async () => {
     const project = await initialize()
     const initial = sandbox.service.database.getActiveCheckpoint(project.id)!
