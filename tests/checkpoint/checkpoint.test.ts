@@ -255,6 +255,28 @@ describe('checkpoint and safe restore', () => {
     expect(await readFile(join(sandbox.projectPath, 'app.txt'), 'utf8')).toBe('two\r\n')
   })
 
+  it.each(['available', 'missing and exact', 'missing and normalized'] as const)('verifies original bytes on undo when the recovery copy is %s', async (copy) => {
+    sandbox = await createSandbox()
+    const name = '..line.txt'
+    await writeProjectFile(sandbox, '.gitattributes', `${name} text eol=lf\n`)
+    await writeProjectFile(sandbox, name, 'first\n')
+    const project = await sandbox.service.addProject({ path: sandbox.projectPath, initialize: true })
+    const target = sandbox.service.database.getActiveCheckpoint(project.id)!
+    const original = Buffer.from(copy === 'missing and exact' ? 'mixed\nlast\n' : 'mixed\r\nlast\n')
+    await writeProjectFile(sandbox, name, original)
+    const preview = await sandbox.service.prepareRestore(project.id, target.id)
+    const applied = await sandbox.service.executeRestore(preview.token)
+    if (copy !== 'available') await rm(join(applied.recoveryDirectory!, 'files', name))
+    if (copy === 'missing and normalized') {
+      await expect(sandbox.service.undoRestore(applied.id)).rejects.toMatchObject({ code: 'RECOVERY_ENTRY_CORRUPTED' })
+      expect(await readFile(join(project.path, name), 'utf8')).toBe('first\n')
+      expect(sandbox.service.getRestore(applied.id).status).toBe('completed')
+    } else {
+      await sandbox.service.undoRestore(applied.id)
+      expect(await readFile(join(project.path, name))).toEqual(original)
+    }
+  })
+
   it('captures current bytes of a staged file even after it becomes ignored', async () => {
     sandbox = await createSandbox('staged then ignored')
     await writeProjectFile(sandbox, '.gitignore', '\n')

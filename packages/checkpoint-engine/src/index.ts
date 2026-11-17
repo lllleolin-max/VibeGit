@@ -632,14 +632,7 @@ export class CheckpointEngine {
     let undoMutationCompleted = false
     let undoAttemptRestoreId: string | undefined
     try {
-      // Git omits empty directories even when every file was captured. Older
-      // manifests can mark such directories as captured; use the original tree.
-      const uncapturedConflicts = manifest.conflicts.filter((entry) => entry.kind === 'directory' || !entry.capturedInInsurance)
-      for (const entry of uncapturedConflicts) {
-        const savedOriginal = this.safeJoin(original.recoveryDirectory, entry.recoveryRelativePath)
-        if (!(await this.git.fileExists(savedOriginal))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
-        await this.verifyRecoveryEntry(savedOriginal, entry)
-      }
+      const originals = await this.originalsForUndo(project.path, original.recoveryDirectory, manifest)
       const preview = await this.prepareRestoreLocked(original.projectId, original.insuranceCheckpointId)
       undoAttemptRestoreId = this.database.getRestoreByToken(preview.token)?.record.id
       undoExecutionStarted = true
@@ -651,9 +644,11 @@ export class CheckpointEngine {
         randomUUID()
       )
 
-      const restoredConflictPaths = new Set(uncapturedConflicts.map((entry) => entry.path))
-      for (const entry of uncapturedConflicts) {
+      const restoredConflictPaths = new Set(manifest.conflicts.filter((entry) => entry.moved).map((entry) => entry.path))
+      for (const entry of originals) {
         const current = this.git.resolveProjectFile(project.path, entry.path)
+        if (entry.capturedInInsurance && entry.kind !== 'directory' && await this.git.fileExists(current) &&
+          await this.matchesRecoveryEntry(current, entry)) continue
         await this.moveCurrentToUndoRecovery(project.id, current, this.safeJoin(undoRecoveryDirectory, `created-after-restore/${entry.path}`))
         const savedOriginal = this.safeJoin(original.recoveryDirectory, entry.recoveryRelativePath)
         if (!(await this.git.fileExists(savedOriginal))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
@@ -888,17 +883,50 @@ export class CheckpointEngine {
     return size
   }
 
-  private async verifyRecoveryEntry(path: string, expected: RecoveryEntry): Promise<void> {
+  private async matchesRecoveryEntry(path: string, expected: RecoveryEntry): Promise<boolean> {
     const actual = await this.describeRecoveryEntry(path)
-    if (
-      actual.kind !== expected.kind ||
-      actual.size !== expected.size ||
-      actual.sha256 !== expected.sha256
-    ) {
+    return actual.kind === expected.kind && actual.size === expected.size &&
+      actual.sha256 === expected.sha256 && actual.mode === expected.mode
+  }
+
+  private async verifyRecoveryEntry(path: string, expected: RecoveryEntry): Promise<void> {
+    if (!(await this.matchesRecoveryEntry(path, expected))) {
       throw new VibeGitError('RECOVERY_ENTRY_CORRUPTED', `恢复区文件校验失败：${expected.path}`, {
         remediation: '保留恢复区，不要继续覆盖文件；请从恢复清单人工取回。'
       })
     }
+  }
+
+  private async originalsForUndo(projectPath: string, recoveryDirectory: string, manifest: RestoreManifest): Promise<RecoveryEntry[]> {
+    const originals: RecoveryEntry[] = []
+    const fromInsurance: RecoveryEntry[] = []
+    for (const entry of manifest.conflicts) {
+      if (!entry.moved) continue
+      const path = this.safeJoin(recoveryDirectory, entry.recoveryRelativePath)
+      try {
+        if (!(await this.git.fileExists(path))) throw new VibeGitError('RECOVERY_ENTRY_MISSING', `恢复区文件缺失：${entry.path}`)
+        await this.verifyRecoveryEntry(path, entry)
+        originals.push(entry)
+      } catch (error) {
+        // Git cannot recreate an empty directory. For regular files and links,
+        // a legacy manifest's path-only flag is insufficient to prove fidelity.
+        if (entry.kind === 'directory' || !entry.capturedInInsurance || !(error instanceof VibeGitError) ||
+          !['RECOVERY_ENTRY_CORRUPTED', 'RECOVERY_ENTRY_MISSING'].includes(error.code)) throw error
+        fromInsurance.push(entry)
+      }
+    }
+    if (fromInsurance.length) {
+      const staging = await mkdtemp(join(tmpdir(), 'vibegit-undo-insurance-'))
+      try {
+        // Validate the bytes Git would actually check out, including its EOL
+        // conversions, before an undo with a missing recovery copy can proceed.
+        await this.git.materializeCommit(projectPath, manifest.insuranceObjectId, staging)
+        for (const entry of fromInsurance) await this.verifyRecoveryEntry(this.safeJoin(staging, entry.path), entry)
+      } finally {
+        await rm(staging, { recursive: true, force: true })
+      }
+    }
+    return originals
   }
 
   private async persistManifest(recoveryDirectory: string, manifest: RestoreManifest): Promise<void> {
@@ -935,7 +963,7 @@ export class CheckpointEngine {
 
   private safeJoin(root: string, path: string): string {
     const target = resolve(root, path)
-    if (!isPathInside(root, target) || relative(root, target).startsWith('..')) {
+    if (!isPathInside(root, target)) {
       throw new VibeGitError('UNSAFE_PROJECT_PATH', '保存点包含越出恢复目录的路径')
     }
     return target
